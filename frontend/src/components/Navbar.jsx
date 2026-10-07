@@ -59,6 +59,7 @@ export default function Navbar({ onToggleMobileSidebar, isMobileSidebarOpen, onO
               <div className="flex items-baseline font-extrabold text-xl tracking-tight text-slate-900 dark:text-white">
                 <span>khojbeen</span>
                 <span className="text-amber-500 dark:text-amber-400">.ai</span>
+                <span className="ml-1.5 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-md shadow-sm">2.0</span>
               </div>
             </Link>
           </div>

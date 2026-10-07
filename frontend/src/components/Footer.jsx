@@ -17,8 +17,9 @@ export default function Footer() {
               <div className="w-8 h-8 rounded-lg bg-teal-600 flex items-center justify-center text-white font-bold text-sm">
                 🔍
               </div>
-              <span className="font-bold text-lg text-white tracking-tight">
-                khojbeen<span className="text-amber-400">.ai</span>
+              <span className="font-bold text-lg text-white tracking-tight flex items-center gap-1.5">
+                <span>khojbeen<span className="text-amber-400">.ai</span></span>
+                <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider bg-emerald-600 text-white rounded">2.0</span>
               </span>
             </div>
             <p className="text-sm text-slate-400 max-w-sm leading-relaxed">

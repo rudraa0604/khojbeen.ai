@@ -97,6 +97,7 @@ export default function LandingSplash({ onEnter, isOpen = true }) {
           <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white flex items-center justify-center gap-1.5 drop-shadow-lg">
             <span>khojbeen</span>
             <span className="text-amber-400">.ai</span>
+            <span className="ml-2 px-2.5 py-0.5 text-xs sm:text-sm font-black uppercase tracking-wider bg-gradient-to-r from-teal-400 to-emerald-500 text-slate-950 rounded-lg shadow-md">2.0</span>
           </h1>
           <p className="text-lg sm:text-2xl font-black bg-gradient-to-r from-teal-300 via-cyan-200 to-amber-300 bg-clip-text text-transparent italic tracking-wide">
             “Khoya hai? Khojbeen karega.”
