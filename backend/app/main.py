@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, FileResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -90,15 +90,6 @@ app.include_router(qr_tags.router)
 app.include_router(campuses.router)
 app.include_router(super_admin.router)
 
-@app.get("/")
-def root():
-    return {
-        "message": "Welcome to khojbeen.ai Backend API",
-        "status": "online",
-        "docs": "/docs",
-        "health": "/api/health"
-    }
-
 @app.get("/api/health")
 def health_check():
     return {
@@ -107,3 +98,33 @@ def health_check():
         "version": "2.0.0",
         "environment": settings.ENVIRONMENT
     }
+
+# Frontend SPA Serving (for unified container or production hosting)
+dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist"))
+if not os.path.exists(dist_dir):
+    dist_dir = "/app/frontend/dist"
+
+if os.path.exists(dist_dir) and os.path.exists(os.path.join(dist_dir, "index.html")):
+    assets_dir = os.path.join(dist_dir, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    # Serve static files at root level like favicon, manifest, etc.
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path in ["docs", "redoc", "openapi.json"] or full_path.startswith("uploads/"):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        file_path = os.path.join(dist_dir, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        index_file = os.path.join(dist_dir, "index.html")
+        return FileResponse(index_file)
+else:
+    @app.get("/")
+    def root():
+        return {
+            "message": "Welcome to khojbeen.ai Backend API",
+            "status": "online",
+            "docs": "/docs",
+            "health": "/api/health"
+        }

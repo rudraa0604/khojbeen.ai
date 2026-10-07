@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: khojbeen_app
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8000
+    volumes:
+      - ./backend/uploads:/app/backend/uploads
+      - ./backend/khojbeen.db:/app/backend/khojbeen.db
+    restart: unless-stopped
