@@ -5,7 +5,8 @@ import {
   Shield, CheckCircle, XCircle, LogOut, Package, RefreshCw, 
   Search, AlertCircle, FileCheck, Layers, Eye, Phone, Mail, User, 
   Check, Users, QrCode, MessageSquare, Settings, Share2, Megaphone, 
-  Trash2, Filter, ChevronRight, UserX, UserCheck, Clock, Building
+  Trash2, Filter, ChevronRight, UserX, UserCheck, Clock, Building,
+  Plus, Edit3, MapPin, PlusCircle
 } from 'lucide-react';
 import SEO from '../components/SEO';
 import StatusBadge from '../components/StatusBadge';
@@ -27,6 +28,7 @@ export default function AdminDashboard() {
   const [students, setStudents] = useState([]);
   const [inquiries, setInquiries] = useState([]);
   const [scanLogs, setScanLogs] = useState([]);
+  const [coordinators, setCoordinators] = useState([]);
   const [collegeSettings, setCollegeSettings] = useState({
     name: '',
     logo_url: '',
@@ -36,7 +38,7 @@ export default function AdminDashboard() {
   });
 
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview'); // overview | reports | claims | students | inquiries | scanLogs | settings
+  const [activeTab, setActiveTab] = useState('overview'); // overview | reports | claims | students | inquiries | coordinators | scanLogs | settings
 
   // Filter & Search states for reports
   const [reportTypeFilter, setReportTypeFilter] = useState('all');
@@ -47,8 +49,10 @@ export default function AdminDashboard() {
   const [toast, setToast] = useState(null);
   const [decisionModal, setDecisionModal] = useState(null); // { claimId, action: 'approved' | 'rejected' }
   const [inquiryReplyModal, setInquiryReplyModal] = useState(null); // { inquiry, status, replyText }
+  const [coordinatorModal, setCoordinatorModal] = useState(null); // { mode: 'create' | 'edit', data: {} }
   const [adminNote, setAdminNote] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [submittingCoord, setSubmittingCoord] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
@@ -85,6 +89,15 @@ export default function AdminDashboard() {
       setStudents(studentList || []);
       setInquiries(inquiryList || []);
       setScanLogs(scans || []);
+
+      // Load coordinators for this campus
+      if (dashStats?.campus_id) {
+        const coordList = await api.getFacultyCoordinators({ campus_id: dashStats.campus_id }).catch(() => []);
+        setCoordinators(coordList || []);
+      } else {
+        const coordList = await api.getFacultyCoordinators().catch(() => []);
+        setCoordinators(coordList || []);
+      }
 
       if (dashStats.campus_name) setCampusName(dashStats.campus_name);
       if (dashStats.campus_logo) setCampusLogo(dashStats.campus_logo);
@@ -236,6 +249,63 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleOpenAddCoordinator = () => {
+    setCoordinatorModal({
+      mode: 'create',
+      data: {
+        campus_id: stats?.campus_id || 1,
+        name: '',
+        department: '',
+        designation: '',
+        email: '',
+        phone: '',
+        office: '',
+        available_timings: '',
+        photo: '',
+      }
+    });
+  };
+
+  const handleOpenEditCoordinator = (coord) => {
+    setCoordinatorModal({
+      mode: 'edit',
+      data: { ...coord }
+    });
+  };
+
+  const handleSaveCoordinator = async (e) => {
+    e.preventDefault();
+    setSubmittingCoord(true);
+    try {
+      if (coordinatorModal.mode === 'create') {
+        await api.createFacultyCoordinator(coordinatorModal.data, token);
+        setToast({ type: 'success', message: 'Faculty coordinator added successfully!' });
+      } else {
+        await api.updateFacultyCoordinator(coordinatorModal.data.id, coordinatorModal.data, token);
+        setToast({ type: 'success', message: 'Faculty coordinator updated successfully!' });
+      }
+      setCoordinatorModal(null);
+      const coordList = await api.getFacultyCoordinators({ campus_id: stats?.campus_id }).catch(() => []);
+      setCoordinators(coordList || []);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to save coordinator.' });
+    } finally {
+      setSubmittingCoord(false);
+    }
+  };
+
+  const handleDeleteCoordinator = async (coordId) => {
+    if (!window.confirm('Are you sure you want to remove this faculty coordinator?')) return;
+    try {
+      await api.deleteFacultyCoordinator(coordId, token);
+      setToast({ type: 'success', message: 'Coordinator removed successfully.' });
+      const coordList = await api.getFacultyCoordinators({ campus_id: stats?.campus_id }).catch(() => []);
+      setCoordinators(coordList || []);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to delete coordinator.' });
+    }
+  };
+
   // Filtered items
   const filteredItems = items.filter((item) => {
     const matchesType = reportTypeFilter === 'all' || item.type === reportTypeFilter;
@@ -326,6 +396,7 @@ export default function AdminDashboard() {
             { id: 'overview', label: 'Overview & Stats', icon: Layers },
             { id: 'reports', label: `Manage Reports (${items.length})`, icon: Package },
             { id: 'claims', label: `Pending Claims (${stats?.pending_claims_count || 0})`, icon: FileCheck, badge: stats?.pending_claims_count },
+            { id: 'coordinators', label: `Faculty Coordinators (${coordinators.length})`, icon: UserCheck },
             { id: 'students', label: `Students (${students.length})`, icon: Users },
             { id: 'inquiries', label: `Inquiries (${inquiries.length})`, icon: MessageSquare, badge: inquiries.filter(i => i.status === 'pending').length },
             { id: 'scanLogs', label: `QR Scans (${scanLogs.length})`, icon: QrCode },
@@ -967,6 +1038,139 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* TAB: FACULTY COORDINATORS */}
+        {activeTab === 'coordinators' && (
+          <AnimatedSection direction="up" className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                    Faculty Coordinators Directory
+                  </h2>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 uppercase">
+                    {campusName}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Manage assigned department coordinators for your campus lost & found helpdesks.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenAddCoordinator}
+                className="py-2.5 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Department Coordinator</span>
+              </button>
+            </div>
+
+            {coordinators.length === 0 ? (
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center max-w-md mx-auto space-y-3">
+                <Building className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
+                  No Coordinators Added Yet
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Add faculty and department heads for your college so students can easily find their helpdesks.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenAddCoordinator}
+                  className="py-2 px-4 rounded-xl bg-teal-700 text-white font-bold text-xs inline-flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add First Coordinator</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {coordinators.map((coord) => (
+                  <div
+                    key={coord.id}
+                    className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-3">
+                          <img
+                            src={
+                              coord.photo ||
+                              `https://ui-avatars.com/api/?name=${encodeURIComponent(coord.name)}&background=0F766E&color=fff&size=100`
+                            }
+                            alt={coord.name}
+                            className="w-10 h-10 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                          />
+                          <div>
+                            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                              {coord.name}
+                            </h3>
+                            <p className="text-xs text-teal-700 dark:text-teal-400 font-semibold">
+                              {coord.designation}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditCoordinator(coord)}
+                            className="p-1.5 text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title="Edit Coordinator"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCoordinator(coord.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                            title="Delete Coordinator"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="inline-block px-2.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-semibold mb-3">
+                        {coord.department}
+                      </div>
+
+                      <div className="space-y-1.5 text-xs text-slate-600 dark:text-slate-400 mb-3">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>Office: {coord.office}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>Hours: {coord.available_timings}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs font-bold">
+                      <a
+                        href={`tel:${coord.phone}`}
+                        className="py-1.5 px-2 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 flex items-center justify-center gap-1 hover:bg-teal-100"
+                      >
+                        <Phone className="w-3 h-3" />
+                        <span>Call</span>
+                      </a>
+                      <a
+                        href={`mailto:${coord.email}`}
+                        className="py-1.5 px-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1 hover:bg-slate-200"
+                      >
+                        <Mail className="w-3 h-3" />
+                        <span>Email</span>
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </AnimatedSection>
+        )}
+
       </main>
 
       {/* Decision Modal for Claims */}
@@ -1067,6 +1271,150 @@ export default function AdminDashboard() {
                 {processing ? 'Sending...' : 'Send Response'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Faculty Coordinator Add / Edit Modal */}
+      {coordinatorModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
+              {coordinatorModal.mode === 'create' ? 'Add Department Coordinator' : 'Edit Coordinator Profile'}
+            </h3>
+
+            <form onSubmit={handleSaveCoordinator} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Full Name & Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={coordinatorModal.data.name || ''}
+                  onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, name: e.target.value } }))}
+                  placeholder="e.g. Dr. Rajesh K. Sharma"
+                  className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Department *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={coordinatorModal.data.department || ''}
+                    onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, department: e.target.value } }))}
+                    placeholder="e.g. Computer Science"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Designation *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={coordinatorModal.data.designation || ''}
+                    onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, designation: e.target.value } }))}
+                    placeholder="e.g. HOD / Asst. Prof"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={coordinatorModal.data.email || ''}
+                    onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, email: e.target.value } }))}
+                    placeholder="coord@campus.edu"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Phone / Extension *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={coordinatorModal.data.phone || ''}
+                    onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, phone: e.target.value } }))}
+                    placeholder="+91 98765 43210"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Office / Room No. *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={coordinatorModal.data.office || ''}
+                    onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, office: e.target.value } }))}
+                    placeholder="e.g. Block B, Room 204"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Available Hours *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={coordinatorModal.data.available_timings || ''}
+                    onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, available_timings: e.target.value } }))}
+                    placeholder="Mon-Fri 10am-1pm"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Photo URL (Optional)
+                </label>
+                <input
+                  type="url"
+                  value={coordinatorModal.data.photo || ''}
+                  onChange={(e) => setCoordinatorModal(prev => ({ ...prev, data: { ...prev.data, photo: e.target.value } }))}
+                  placeholder="https://..."
+                  className="w-full py-2 px-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-teal-600"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setCoordinatorModal(null)}
+                  className="py-2 px-4 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingCoord}
+                  className="py-2 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-sm disabled:opacity-50"
+                >
+                  {submittingCoord ? 'Saving...' : 'Save Coordinator'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

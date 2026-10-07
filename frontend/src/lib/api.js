@@ -488,9 +488,10 @@ export const api = {
   },
 
   // Faculty Coordinators API
-  getFacultyCoordinators: async ({ department, q } = {}) => {
+  getFacultyCoordinators: async ({ department, campus_id, q } = {}) => {
     const params = new URLSearchParams();
     if (department && department !== 'All') params.append('department', department);
+    if (campus_id && campus_id !== 'all') params.append('campus_id', campus_id);
     if (q) params.append('q', q);
 
     const res = await fetch(`${API_BASE_URL}/api/faculty?${params.toString()}`);

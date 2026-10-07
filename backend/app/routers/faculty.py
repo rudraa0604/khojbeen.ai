@@ -15,15 +15,19 @@ router = APIRouter(prefix="/api/faculty", tags=["faculty"])
 
 @router.get("", response_model=List[FacultyCoordinatorPublic])
 def list_faculty_coordinators(
+    campus_id: Optional[int] = Query(None, description="Filter by campus/college ID"),
     department: Optional[str] = Query(None, description="Filter by department"),
     q: Optional[str] = Query(None, description="Search by name, department, or office"),
     db: Session = Depends(get_db)
 ):
     """
     Public listing of all faculty and staff coordinators.
-    Supports department filtering and search.
+    Supports campus, department filtering and search.
     """
     query = db.query(FacultyCoordinator)
+
+    if campus_id is not None:
+        query = query.filter(FacultyCoordinator.campus_id == campus_id)
 
     if department and department.lower() != "all":
         query = query.filter(FacultyCoordinator.department.ilike(f"%{department}%"))
@@ -59,9 +63,18 @@ def create_faculty_coordinator(
 ):
     """
     Authenticated endpoint to add a faculty coordinator profile.
-    Tied to the authenticated user/admin.
+    - Super Admin: Can add coordinator for any college/campus (uses payload.campus_id or default).
+    - College Admin: Can ONLY add coordinator for their assigned college (enforced current_admin.campus_id).
     """
+    # Determine campus_id based on admin role
+    if current_admin.role == "super_admin":
+        assigned_campus_id = payload.campus_id if payload.campus_id else (current_admin.campus_id or 1)
+    else:
+        # College Admin is strictly scoped to their own campus
+        assigned_campus_id = current_admin.campus_id or 1
+
     coordinator = FacultyCoordinator(
+        campus_id=assigned_campus_id,
         admin_id=current_admin.id,
         name=payload.name.strip(),
         department=payload.department.strip(),
@@ -87,20 +100,27 @@ def update_faculty_coordinator(
 ):
     """
     Authenticated endpoint to update coordinator profile.
-    Users can edit their own profile, or administrative users can edit any profile.
+    - Super Admin: Can edit any coordinator across any college.
+    - College Admin: Can ONLY edit coordinators belonging to their own college (campus_id match).
     """
     coordinator = db.query(FacultyCoordinator).filter(FacultyCoordinator.id == coordinator_id).first()
     if not coordinator:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty coordinator not found")
 
-    # If coordinator has an admin_id, verify ownership unless admin user
-    if coordinator.admin_id and coordinator.admin_id != current_admin.id and current_admin.username != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only edit your own faculty coordinator profile"
-        )
+    # Verify authorization
+    if current_admin.role != "super_admin":
+        if coordinator.campus_id and current_admin.campus_id and coordinator.campus_id != current_admin.campus_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are only authorized to manage faculty coordinators from your own college/campus."
+            )
 
     update_data = payload.model_dump(exclude_unset=True)
+
+    # Prevent College Admin from moving coordinator to another college
+    if current_admin.role != "super_admin":
+        update_data.pop("campus_id", None)
+
     for key, value in update_data.items():
         if value is not None:
             if isinstance(value, str):
@@ -122,17 +142,22 @@ def delete_faculty_coordinator(
 ):
     """
     Authenticated endpoint to delete a coordinator profile.
+    - Super Admin: Can delete any coordinator.
+    - College Admin: Can ONLY delete coordinators belonging to their own college.
     """
     coordinator = db.query(FacultyCoordinator).filter(FacultyCoordinator.id == coordinator_id).first()
     if not coordinator:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty coordinator not found")
 
-    if coordinator.admin_id and coordinator.admin_id != current_admin.id and current_admin.username != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only delete your own faculty coordinator profile"
-        )
+    # Verify authorization
+    if current_admin.role != "super_admin":
+        if coordinator.campus_id and current_admin.campus_id and coordinator.campus_id != current_admin.campus_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are only authorized to delete faculty coordinators from your own college/campus."
+            )
 
     db.delete(coordinator)
     db.commit()
     return None
+

@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { 
   Shield, Building, Users, Package, RefreshCw, LogOut, Plus, 
   Edit, ToggleLeft, ToggleRight, CheckCircle, AlertCircle, 
-  Search, Mail, Globe, Share2, Layers, KeyRound, Check
+  Search, Mail, Globe, Share2, Layers, KeyRound, Check,
+  Trash2, Phone, MapPin, Clock, Edit3, UserCheck
 } from 'lucide-react';
 import SEO from '../components/SEO';
 import Toast from '../components/Toast';
@@ -20,14 +21,17 @@ export default function SuperAdminDashboard() {
   const [stats, setStats] = useState(null);
   const [colleges, setColleges] = useState([]);
   const [admins, setAdmins] = useState([]);
+  const [coordinators, setCoordinators] = useState([]);
+  const [coordCollegeFilter, setCoordCollegeFilter] = useState('all');
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview'); // overview | colleges | admins
+  const [activeTab, setActiveTab] = useState('overview'); // overview | colleges | admins | coordinators
 
   const [toast, setToast] = useState(null);
 
   // Modals
   const [collegeModal, setCollegeModal] = useState(null); // { mode: 'create' | 'edit', data: {} }
   const [adminModal, setAdminModal] = useState(null); // { mode: 'create' | 'edit', data: {} }
+  const [coordModal, setCoordModal] = useState(null); // { mode: 'create' | 'edit', data: {} }
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -51,14 +55,16 @@ export default function SuperAdminDashboard() {
   const loadData = async (authToken) => {
     setLoading(true);
     try {
-      const [platformStats, collegeList, adminList] = await Promise.all([
+      const [platformStats, collegeList, adminList, coordList] = await Promise.all([
         api.getSuperAdminStats(authToken),
         api.getSuperAdminColleges(authToken),
         api.getSuperAdminAdmins(authToken),
+        api.getFacultyCoordinators().catch(() => []),
       ]);
       setStats(platformStats);
       setColleges(collegeList || []);
       setAdmins(adminList || []);
+      setCoordinators(coordList || []);
     } catch (err) {
       console.error(err);
       setToast({ type: 'error', message: err.message || 'Failed to load platform data.' });
@@ -131,6 +137,61 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const handleOpenAddCoordinator = () => {
+    setCoordModal({
+      mode: 'create',
+      data: {
+        campus_id: colleges[0]?.id || 1,
+        name: '',
+        department: '',
+        designation: '',
+        email: '',
+        phone: '',
+        office: '',
+        available_timings: '',
+        photo: '',
+      }
+    });
+  };
+
+  const handleOpenEditCoordinator = (coord) => {
+    setCoordModal({
+      mode: 'edit',
+      data: { ...coord }
+    });
+  };
+
+  const handleSaveCoordinator = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      if (coordModal.mode === 'create') {
+        await api.createFacultyCoordinator(coordModal.data, token);
+        setToast({ type: 'success', message: 'Faculty coordinator added successfully!' });
+      } else {
+        await api.updateFacultyCoordinator(coordModal.data.id, coordModal.data, token);
+        setToast({ type: 'success', message: 'Faculty coordinator updated successfully!' });
+      }
+      setCoordModal(null);
+      await loadData(token);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to save coordinator.' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteCoordinator = async (coordId) => {
+    if (!window.confirm('Are you sure you want to remove this faculty coordinator?')) return;
+    try {
+      await api.deleteFacultyCoordinator(coordId, token);
+      setToast({ type: 'success', message: 'Coordinator removed successfully.' });
+      await loadData(token);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to delete coordinator.' });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 pb-16">
       <SEO
@@ -196,11 +257,12 @@ export default function SuperAdminDashboard() {
         </div>
 
         {/* Tab Switcher */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-2 border-t border-slate-800/80 pt-1">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-2 border-t border-slate-800/80 pt-1 overflow-x-auto">
           {[
             { id: 'overview', label: 'Platform Stats', icon: Layers },
             { id: 'colleges', label: `Colleges (${colleges.length})`, icon: Building },
             { id: 'admins', label: `College Admins (${admins.length})`, icon: Users },
+            { id: 'coordinators', label: `Faculty Coordinators (${coordinators.length})`, icon: UserCheck },
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -430,6 +492,138 @@ export default function SuperAdminDashboard() {
           </div>
         )}
 
+        {/* TAB 4: FACULTY COORDINATORS */}
+        {activeTab === 'coordinators' && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-slate-950 border border-slate-800">
+              <div>
+                <h2 className="text-base font-bold text-white">
+                  Multi-Campus Faculty Coordinators
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Create, update, and manage designated department coordinators across all colleges.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <select
+                  value={coordCollegeFilter}
+                  onChange={(e) => setCoordCollegeFilter(e.target.value)}
+                  className="py-2 px-3 rounded-xl border border-slate-700 bg-slate-900 text-xs text-slate-200 focus:outline-none focus:border-amber-400"
+                >
+                  <option value="all">All Colleges & Campuses</option>
+                  {colleges.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  onClick={handleOpenAddCoordinator}
+                  className="py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Coordinator</span>
+                </button>
+              </div>
+            </div>
+
+            {coordinators.filter(c => coordCollegeFilter === 'all' || c.campus_id === parseInt(coordCollegeFilter)).length === 0 ? (
+              <div className="p-12 text-center bg-slate-950 rounded-2xl border border-slate-800 text-slate-400 text-sm">
+                No faculty coordinators found for the selected filter.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {coordinators
+                  .filter(c => coordCollegeFilter === 'all' || c.campus_id === parseInt(coordCollegeFilter))
+                  .map((coord) => {
+                    const collegeObj = colleges.find(col => col.id === coord.campus_id);
+                    return (
+                      <div
+                        key={coord.id}
+                        className="bg-slate-950 rounded-2xl border border-slate-800 p-4 hover:border-slate-700 transition-all flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={
+                                  coord.photo ||
+                                  `https://ui-avatars.com/api/?name=${encodeURIComponent(coord.name)}&background=F59E0B&color=000&size=100`
+                                }
+                                alt={coord.name}
+                                className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0"
+                              />
+                              <div>
+                                <h3 className="font-bold text-sm text-white">{coord.name}</h3>
+                                <p className="text-xs text-amber-400 font-semibold">{coord.designation}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleOpenEditCoordinator(coord)}
+                                className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg hover:bg-slate-800"
+                                title="Edit Coordinator"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCoordinator(coord.id)}
+                                className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
+                                title="Delete Coordinator"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-400/10 text-amber-300 border border-amber-400/20">
+                              {collegeObj ? collegeObj.name : `Campus #${coord.campus_id}`}
+                            </span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300">
+                              {coord.department}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1 text-xs text-slate-400 mb-3">
+                            <div className="flex items-center gap-2">
+                              <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                              <span>{coord.office}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                              <span>{coord.available_timings}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-900 text-xs font-semibold">
+                          <a
+                            href={`tel:${coord.phone}`}
+                            className="py-1.5 px-2 rounded-lg bg-slate-900 text-slate-300 flex items-center justify-center gap-1 hover:bg-slate-800"
+                          >
+                            <Phone className="w-3 h-3 text-amber-400" />
+                            <span>{coord.phone}</span>
+                          </a>
+                          <a
+                            href={`mailto:${coord.email}`}
+                            className="py-1.5 px-2 rounded-lg bg-slate-900 text-slate-300 flex items-center justify-center gap-1 hover:bg-slate-800 truncate"
+                          >
+                            <Mail className="w-3 h-3 text-amber-400" />
+                            <span className="truncate">Email</span>
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        )}
+
       </main>
 
       {/* College Create/Edit Modal */}
@@ -612,6 +806,149 @@ export default function SuperAdminDashboard() {
                   className="py-2 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-sm"
                 >
                   {submitting ? 'Saving...' : 'Save Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Coordinator Create/Edit Modal */}
+      {coordModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 rounded-2xl max-w-lg w-full p-6 border border-slate-800 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-white">
+              {coordModal.mode === 'create' ? 'Add Multi-Campus Faculty Coordinator' : 'Edit Faculty Coordinator'}
+            </h3>
+
+            <form onSubmit={handleSaveCoordinator} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-300 mb-1">Assigned College / Campus *</label>
+                <select
+                  value={coordModal.data.campus_id || (colleges[0]?.id || 1)}
+                  onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, campus_id: parseInt(e.target.value) } }))}
+                  className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                >
+                  {colleges.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.city})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-300 mb-1">Full Name & Title *</label>
+                <input
+                  type="text"
+                  required
+                  value={coordModal.data.name || ''}
+                  onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, name: e.target.value } }))}
+                  placeholder="e.g. Dr. Rajesh K. Sharma"
+                  className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Department *</label>
+                  <input
+                    type="text"
+                    required
+                    value={coordModal.data.department || ''}
+                    onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, department: e.target.value } }))}
+                    placeholder="e.g. Computer Science"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Designation *</label>
+                  <input
+                    type="text"
+                    required
+                    value={coordModal.data.designation || ''}
+                    onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, designation: e.target.value } }))}
+                    placeholder="e.g. Head of Dept"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Email Address *</label>
+                  <input
+                    type="email"
+                    required
+                    value={coordModal.data.email || ''}
+                    onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, email: e.target.value } }))}
+                    placeholder="coord@campus.edu"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Phone / Extension *</label>
+                  <input
+                    type="text"
+                    required
+                    value={coordModal.data.phone || ''}
+                    onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, phone: e.target.value } }))}
+                    placeholder="+91 98765 43210"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Office / Room No. *</label>
+                  <input
+                    type="text"
+                    required
+                    value={coordModal.data.office || ''}
+                    onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, office: e.target.value } }))}
+                    placeholder="e.g. Block B, Room 204"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-300 mb-1">Available Hours *</label>
+                  <input
+                    type="text"
+                    required
+                    value={coordModal.data.available_timings || ''}
+                    onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, available_timings: e.target.value } }))}
+                    placeholder="Mon-Fri 10am-1pm"
+                    className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-300 mb-1">Photo URL (Optional)</label>
+                <input
+                  type="url"
+                  value={coordModal.data.photo || ''}
+                  onChange={(e) => setCoordModal(prev => ({ ...prev, data: { ...prev.data, photo: e.target.value } }))}
+                  placeholder="https://..."
+                  className="w-full py-2 px-3 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setCoordModal(null)}
+                  className="py-2 px-4 rounded-xl text-xs font-bold text-slate-400 hover:text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="py-2 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-sm disabled:opacity-50"
+                >
+                  {submitting ? 'Saving...' : 'Save Coordinator'}
                 </button>
               </div>
             </form>
