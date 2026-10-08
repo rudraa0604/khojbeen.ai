@@ -150,9 +150,36 @@ graph TD
   * Network-wide health metrics and campus comparison charts.
   * Provision new colleges with custom slugs, logos, contact desks, and federation rules.
 
+### 4. 🏢 College Admin & Super Admin Command Center
+* **Interactive Metric Cards:** All overview stat cards (Total Reports, Open Lost, Open Found, AI Matched, Claimed, Closed/Resolved, Active Students, QR Scan Events) are keyboard-focusable and link directly with pre-filtered views.
+* **AI Matches Command Center (`/admin/matches`):**
+  * Pair-row visualization (`[Lost Report] <-> [Found Report]`) with match score chips, verdicts (Strong 80%+, Possible 50-79%, Weak <50%), status lifecycle, and direct Review action.
+  * Multi-dimensional filtering by status, verdict, date range, and keyword search.
+* **Deep Match Review Screen (`/admin/matches/:id`):**
+  * Side-by-side comparison of lost vs found items (photos, metadata, location proximity, timestamps, QR-scan badges).
+  * Circular score gauge (0-100%) and granular breakdown bars (Semantic NLP, Visual Similarity, Attributes).
+  * Positive highlight chips ("Same color", "Same brand", "Found 40m away") and penalty mismatch chips ("Different brand") with keyword highlighting.
+  * Claim verification block (claimant info, proof text, secret question verification with tick/cross check, zoomable receipts).
+  * Decision bar: **Approve Handover** (triggers 4-digit handover code), **Reject** (with required audit reason), or **Ask for More Proof**.
+* **Mascot & UI Layout Optimization:**
+  * Non-intrusive draggable mascot with bottom/right safe padding.
+  * Accurate single-route sidebar highlighting.
+  * Horizontal swipe/scroll tab-bar with fade edges for complete accessibility on all viewports.
+
 ---
 
-### 5. 🌐 Cross-College Privacy-Preserving Federation
+### 5. 🏷️ Privacy-Safe Finder 3-Option Flow & Secure Handover
+* **3-Option Public Scan Interface (`/item/:code`):**
+  * **Option A (Anonymous Message):** Finder sends a quick-reply message ("I found your item", "Left at front desk") with location and optional photo without creating an account.
+  * **Option B (Coordinator Handover):** Finder selects a faculty coordinator / Lost & Found desk from the college directory with expected handover timing.
+  * **Option C (Direct Verified Contact):** Finder shares contact info + preferred campus public meeting point with mandatory consent; details remain strictly masked until admin claim verification.
+* **4-Digit Secure Handover Verification:**
+  * On admin claim approval, a secure 4-digit OTP is generated for the owner.
+  * The coordinator/finder enters the code at collection via `/api/students/verify-handover` with rate-limiting and brute-force lockout.
+
+---
+
+### 6. 🌐 Cross-College Privacy-Preserving Federation
 * **Federated Multi-Campus Search (`/search`):** Search lost/found items within your home campus or toggle **"All Colleges"** across the participating university network.
 * **Institutional Badging:** Cards clearly indicate the source campus with badges and college logos.
 * **Secure Portal Inquiries ("Contact via Portal"):**

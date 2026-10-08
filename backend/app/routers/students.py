@@ -17,7 +17,7 @@ from jose import JWTError, jwt
 
 from app.config import settings
 from app.db import get_db
-from app.models import User, Item, ScanEvent, Match, Notification
+from app.models import User, Item, ScanEvent, Match, Notification, FinderResponse, Claim, FacultyCoordinator, Campus
 from app.schemas import (
     StudentLogin,
     StudentRegister,
@@ -29,7 +29,10 @@ from app.schemas import (
     PublicItemScan,
     PublicScanReportFound,
     MatchResponse,
-    ItemPublic
+    ItemPublic,
+    FinderResponseCreate,
+    FinderResponsePublic,
+    HandoverVerifyRequest
 )
 from app.services.turnstile import verify_turnstile_token
 from app.services.notifications import create_in_app_notification, send_smtp_email_background
@@ -897,3 +900,244 @@ def submit_found_from_qr(
             send_sms_notification(target_mobile, sms_text)
 
     return {"message": "Thank you! The owner has been notified."}
+
+
+@router.get("/scan/{unique_code}/coordinators")
+def get_coordinators_for_tag(
+    unique_code: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns faculty coordinators list for the item's college so the finder can select Option B.
+    """
+    item = db.query(Item).filter(Item.unique_qr_code == unique_code.upper()).first()
+    campus_id = item.campus_id if item else 1
+    coords = db.query(FacultyCoordinator).filter(FacultyCoordinator.campus_id == campus_id).all()
+    return [{
+        "id": c.id,
+        "name": c.name,
+        "department": c.department,
+        "designation": c.designation,
+        "office": c.office,
+        "available_timings": c.available_timings,
+        "photo": c.photo
+    } for c in coords]
+
+
+@router.post("/scan/{unique_code}/finder-response")
+async def submit_finder_3_option_response(
+    unique_code: str,
+    req: Request,
+    background_tasks: BackgroundTasks,
+    option_type: str = Form(..., description="'A', 'B', or 'C'"),
+    message: Optional[str] = Form(None),
+    found_location: Optional[str] = Form(None),
+    meeting_place: Optional[str] = Form(None),
+    meeting_time: Optional[str] = Form(None),
+    coordinator_id: Optional[int] = Form(None),
+    finder_name: Optional[str] = Form(None),
+    finder_mobile: Optional[str] = Form(None),
+    finder_department: Optional[str] = Form(None),
+    consent_given: bool = Form(False),
+    photo: Optional[UploadFile] = File(None),
+    turnstile_token: Optional[str] = Form(None),
+    website: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Task 24 (Revised) Finder Response handling:
+    Option A: Anonymous message to owner (+ optional location + optional photo)
+    Option B: Hand to Faculty Coordinator / Lost & Found desk (+ expected handover time)
+    Option C: Share contact details for post-verification contact (+ meeting place & time + consent)
+
+    - Creates FinderResponse entry
+    - Creates ScanEvent log
+    - Creates QR-confirmed 100% Match in matches table
+    - Sends privacy-safe notification to item owner
+    """
+    # 1. Honeypot check
+    if website and len(website.strip()) > 0:
+        raise HTTPException(status_code=400, detail="Spam detected")
+
+    # 2. Rate limit check
+    client_ip = req.client.host if req.client else "unknown"
+    check_scan_rate_limit(client_ip)
+
+    # 3. Turnstile check
+    if turnstile_token:
+        valid_captcha = await verify_turnstile_token(turnstile_token, client_ip)
+        if not valid_captcha:
+            raise HTTPException(status_code=400, detail="Security challenge verification failed")
+
+    # 4. Find item
+    item = db.query(Item).filter(Item.unique_qr_code == unique_code.upper()).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="QR tag not found or invalid")
+
+    # 5. Handle optional photo upload
+    photo_path = None
+    if photo and photo.filename:
+        from app.services.images import save_and_compress_image
+        photo_path, _ = save_and_compress_image(photo)
+
+    # 6. Validate option constraints
+    if option_type not in ["A", "B", "C"]:
+        raise HTTPException(status_code=400, detail="Invalid option type. Must be A, B, or C.")
+
+    if option_type == "C":
+        if not consent_given:
+            raise HTTPException(status_code=400, detail="You must provide consent to share details with the college coordinator.")
+        if not finder_name or not finder_mobile:
+            raise HTTPException(status_code=400, detail="Name and mobile number are required for Option C.")
+
+    # 7. Generate private finder token
+    import secrets
+    finder_token = secrets.token_urlsafe(32)
+
+    # 8. Create FinderResponse record
+    finder_resp = FinderResponse(
+        item_id=item.id,
+        unique_code=unique_code.upper(),
+        campus_id=item.campus_id or 1,
+        option_type=option_type,
+        message=message.strip() if message else None,
+        found_location=found_location.strip() if found_location else None,
+        photo_path=photo_path,
+        meeting_place=meeting_place.strip() if meeting_place else None,
+        meeting_time=meeting_time.strip() if meeting_time else None,
+        coordinator_id=coordinator_id,
+        finder_name=finder_name.strip() if (option_type == "C" and finder_name) else (finder_name.strip() if finder_name else "Good Samaritan"),
+        finder_mobile=finder_mobile.strip() if (option_type == "C" and finder_mobile) else None,
+        finder_department=finder_department.strip() if finder_department else None,
+        consent_given=consent_given,
+        status="submitted",
+        finder_token=finder_token
+    )
+    db.add(finder_resp)
+
+    # 9. Create ScanEvent log
+    scan_event = ScanEvent(
+        item_id=item.id,
+        user_id=item.user_id,
+        finder_name=finder_resp.finder_name,
+        finder_contact=finder_resp.finder_mobile if option_type == "C" else "Anonymous",
+        finder_message=f"[Option {option_type}] {message or 'QR Scan response submitted'}",
+        finder_location=found_location or meeting_place or "Campus"
+    )
+    db.add(scan_event)
+
+    # 10. Automatically create or link a QR-confirmed 100% confidence Match
+    # If item is lost or tagged, create a match record for admin matches tab
+    existing_qr_match = db.query(Match).filter(
+        Match.lost_id == item.id,
+        Match.score == 100.0
+    ).first()
+
+    if not existing_qr_match:
+        qr_match = Match(
+            lost_id=item.id,
+            found_id=item.id, # QR identity self-match
+            score=100.0,
+            text_score=1.0,
+            image_score=1.0 if photo_path else None,
+            has_image_match=bool(photo_path),
+            category_score=1.0,
+            location_score=1.0,
+            date_score=1.0
+        )
+        db.add(qr_match)
+
+    db.commit()
+    db.refresh(finder_resp)
+
+    # 11. Send notification to owner
+    opt_labels = {
+        "A": "sent an anonymous message",
+        "B": "is handing the item to a Faculty Coordinator / Desk",
+        "C": "shared contact details for safe handover upon verification"
+    }
+    action_desc = opt_labels.get(option_type, "scanned your item")
+    notif_title = f"🏷️ QR Tag Update: '{item.title}'"
+    notif_msg = f"A finder {action_desc} for your belonging '{item.title}'.\nDetails: \"{message or 'Finder submitted a response via QR portal.'}\""
+    if found_location:
+        notif_msg += f"\nLocation: {found_location}"
+    if meeting_place:
+        notif_msg += f"\nPreferred Desk/Place: {meeting_place}"
+
+    create_in_app_notification(
+        db=db,
+        recipient_contact=item.contact_email_or_phone,
+        recipient_email=item.user.email if item.user else (item.contact_email_or_phone if "@" in item.contact_email_or_phone else None),
+        title=notif_title,
+        message=notif_msg,
+        link_url="/dashboard",
+        notif_type="qr_scanned"
+    )
+
+    return {
+        "status": "success",
+        "message": "Your response has been securely delivered! The college coordinator will facilitate verified handover.",
+        "option_type": option_type,
+        "finder_token": finder_token
+    }
+
+
+@router.post("/verify-handover")
+def verify_handover_code(
+    payload: HandoverVerifyRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Verifies 4-digit handover code at collection time.
+    Enforces brute-force lockout after 5 incorrect attempts.
+    On success: marks status to Recovered, closes complaint, and notifies everyone.
+    """
+    input_code = payload.code.strip()
+    
+    # Query pending claims with this handover code or item
+    claims_q = db.query(Claim).filter(Claim.status == "approved")
+    if payload.item_id:
+        claims_q = claims_q.filter(Claim.found_id == payload.item_id)
+
+    claims = claims_q.all()
+    matched_claim = None
+
+    for c in claims:
+        if c.handover_code and c.handover_code == input_code:
+            matched_claim = c
+            break
+        elif c.wrong_code_attempts >= 5:
+            raise HTTPException(
+                status_code=429,
+                detail="Security Lock: Too many failed code attempts. Please contact College Admin directly."
+            )
+
+    if not matched_claim:
+        # Increment attempt counter on matching item's claim if available
+        for c in claims:
+            c.wrong_code_attempts += 1
+            db.commit()
+        raise HTTPException(status_code=400, detail="Invalid 4-digit handover code. Please check and try again.")
+
+    # Success: Update claim and item status to recovered / closed
+    matched_claim.handover_status = "handed_over"
+    matched_claim.status = "approved"
+
+    item = db.query(Item).filter(Item.id == matched_claim.found_id).first()
+    if item:
+        item.status = "recovered"
+
+    # Also update associated lost item if linked via match
+    if matched_claim.match_id:
+        m = db.query(Match).filter(Match.id == matched_claim.match_id).first()
+        if m:
+            lost_item = db.query(Item).filter(Item.id == m.lost_id).first()
+            if lost_item:
+                lost_item.status = "recovered"
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "message": "Handover code verified successfully! Item marked as Recovered and closed."
+    }

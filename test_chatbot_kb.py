@@ -29,6 +29,9 @@ test_queries = [
     "Where can I find frequently asked questions?",
     "How does Tag My Item work to protect belongings before losing them?",
     "How do I use the QR Scanner tab on khojbeen.ai?",
+    "How does the admin verify a match?",
+    "What is the AI Matches list on the admin dashboard?",
+    "I found someone's item with a QR tag, what should I do?",
 
     # Hindi questions
     "स्टूडेंट डैशबोर्ड कैसे काम करता है?",

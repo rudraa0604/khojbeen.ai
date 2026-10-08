@@ -104,6 +104,8 @@ function MainLayout() {
               <Route path="/claim/:id" element={<ClaimForm />} />
               <Route path="/admin/login" element={<AdminLogin />} />
               <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin/matches" element={<AdminDashboard />} />
+              <Route path="/admin/matches/:matchId" element={<AdminDashboard />} />
               <Route path="/super-admin" element={<SuperAdminDashboard />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />

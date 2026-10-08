@@ -258,4 +258,22 @@ export const FAQS_DATA = [
     question: 'Who should I contact if I suspect fraudulent activity?',
     answer: 'Immediately reach out to the Central Library Helpdesk or your department Faculty Coordinator listed in the portal support directory.',
   },
+  {
+    id: 35,
+    category: 'Matching & Notifications',
+    question: 'How does the College Admin verify a match or pending claim?',
+    answer: 'College admins access a side-by-side Match Review screen comparing the lost report with the found report. They examine the overall match score (Strong 80%+, Possible 50-79%, Weak <50%), individual breakdowns (semantic text, visual similarity, category/brand/color/location/date proximity), matching keywords, secret verification answers, and proof receipts before approving handover or rejecting.',
+  },
+  {
+    id: 36,
+    category: 'Matching & Notifications',
+    question: 'What is the AI Matches tab on the College Admin dashboard?',
+    answer: 'The Matches tab lists every AI-paired lost item and found item for that college with counterpart photos, titles, score chips, verdicts, statuses, and one-click Review buttons. Admins can filter by verdict, status, category, date, and search by item names.',
+  },
+  {
+    id: 37,
+    category: 'Tag My Item & QR Scanner',
+    question: "I found someone's item with a QR Smart Tag, what should I do?",
+    answer: 'Scan the QR sticker with your phone camera or visit /scan. You will see 3 secure options: (A) Send an anonymous message to the owner, (B) Choose a Faculty Coordinator or Lost & Found desk to drop it off, or (C) Share your details so the owner can contact you safely after college admin verification. The owner never sees your details without admin verification.',
+  },
 ];

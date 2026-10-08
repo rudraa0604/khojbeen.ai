@@ -127,28 +127,29 @@ export default function Sidebar({ isCollapsed, setIsCollapsed, isMobileOpen, set
           {/* Navigation Links */}
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.to || (item.to !== '/' && location.pathname.startsWith(item.to));
+            const isRouteActive = location.pathname === item.to || 
+              (item.to !== '/' && item.to !== '/dashboard' && item.to !== '/admin' && location.pathname.startsWith(item.to)) ||
+              (item.to === '/admin' && location.pathname.startsWith('/admin')) ||
+              (item.to === '/dashboard' && location.pathname.startsWith('/dashboard'));
 
             return (
               <NavLink
                 key={item.to}
                 to={item.to}
                 title={isCollapsed ? item.label : undefined}
-                className={({ isActive: linkActive }) => `
+                className={`
                   group relative flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-semibold transition-all duration-150 min-h-[44px]
-                  ${linkActive || isActive
+                  ${isRouteActive
                     ? item.accent
                       ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/20'
                       : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-l-4 border-emerald-600 dark:border-emerald-400'
-                    : item.accent
-                      ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
-                      : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white'
+                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60 hover:text-slate-900 dark:hover:text-white'
                   }
                   ${isCollapsed ? 'justify-center px-2' : ''}
                 `}
               >
                 <Icon className={`w-5 h-5 shrink-0 transition-transform group-hover:scale-110 ${
-                  item.accent && !(isActive) ? 'text-emerald-600 dark:text-emerald-400' : ''
+                  isRouteActive ? '' : item.accent ? 'text-emerald-600 dark:text-emerald-400' : ''
                 }`} aria-hidden="true" />
 
                 {/* Label (Hidden when collapsed on desktop) */}

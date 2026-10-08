@@ -119,9 +119,14 @@ export const api = {
     return handleResponse(res);
   },
 
-  // Public QR Tag Scan API (Task 15 & 21)
+  // Public QR Tag Scan API (Task 15, 21, 24)
   getPublicScanInfo: async (uniqueCode) => {
     const res = await fetch(`${API_BASE_URL}/api/students/scan/${uniqueCode}`);
+    return handleResponse(res);
+  },
+
+  getCoordinatorsForTag: async (uniqueCode) => {
+    const res = await fetch(`${API_BASE_URL}/api/students/scan/${uniqueCode}/coordinators`);
     return handleResponse(res);
   },
 
@@ -130,6 +135,30 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+    });
+    return handleResponse(res);
+  },
+
+  submitFinder3OptionResponse: async (uniqueCode, formData) => {
+    const res = await fetch(`${API_BASE_URL}/api/students/scan/${uniqueCode}/finder-response`, {
+      method: 'POST',
+      body: formData,
+    });
+    return handleResponse(res);
+  },
+
+  verifyHandoverCode: async (code, itemId = null) => {
+    const res = await fetch(`${API_BASE_URL}/api/students/verify-handover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, item_id: itemId }),
+    });
+    return handleResponse(res);
+  },
+
+  getAdminFinderResponses: async (token) => {
+    const res = await fetch(`${API_BASE_URL}/api/admin/finder-responses`, {
+      headers: { Authorization: `Bearer ${token}` },
     });
     return handleResponse(res);
   },
@@ -284,6 +313,39 @@ export const api = {
 
   getAdminClaims: async (token) => {
     const res = await fetch(`${API_BASE_URL}/api/admin/claims`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return handleResponse(res);
+  },
+
+  getAdminMatches: async (params = {}, token) => {
+    const query = new URLSearchParams();
+    if (params.status && params.status !== 'all') query.append('status', params.status);
+    if (params.verdict && params.verdict !== 'all') query.append('verdict', params.verdict);
+    if (params.category && params.category !== 'all') query.append('category', params.category);
+    if (params.search) query.append('search', params.search);
+    if (params.sort) query.append('sort', params.sort);
+    const res = await fetch(`${API_BASE_URL}/api/admin/matches?${query.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return handleResponse(res);
+  },
+
+  getAdminMatchDetail: async (matchId, token) => {
+    const res = await fetch(`${API_BASE_URL}/api/admin/matches/${matchId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return handleResponse(res);
+  },
+
+  getAdminItemMatches: async (itemId, token) => {
+    const res = await fetch(`${API_BASE_URL}/api/admin/items/${itemId}/matches`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },

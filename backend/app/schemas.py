@@ -276,6 +276,42 @@ class MatchResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class AdminMatchPair(BaseModel):
+    id: int
+    lost_id: int
+    found_id: int
+    score: float
+    verdict: str  # Strong, Possible, Weak
+    label: str    # High, Medium, Low
+    status: str   # new, under_review, claimed, approved, rejected, closed
+    text_score: float
+    image_score: Optional[float] = None
+    has_image_match: bool = False
+    category_score: float
+    location_score: float
+    date_score: float
+    why_matched: str
+    reasons_list: List[str] = []
+    penalties_list: List[str] = []
+    matching_keywords: List[str] = []
+    lost_item: ItemAdmin
+    found_item: ItemAdmin
+    has_claim: bool = False
+    claim_id: Optional[int] = None
+    claim_status: Optional[str] = None
+    is_qr_confirmed: bool = False
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+class AdminMatchesResponse(BaseModel):
+    matches: List[AdminMatchPair]
+    total: int
+    strong_count: int = 0
+    possible_count: int = 0
+    weak_count: int = 0
+
 # --- Claim Schemas ---
 
 class ClaimCreate(BaseModel):
@@ -283,7 +319,10 @@ class ClaimCreate(BaseModel):
     match_id: Optional[int] = None
     claimant_name: str = Field(..., min_length=2, max_length=100)
     claimant_contact: str = Field(..., min_length=5, max_length=100)
+    claimant_department: Optional[str] = Field(None, max_length=100)
     proof_text: str = Field(..., min_length=15, max_length=1000, description="Detailed proof of ownership (min 15 chars)")
+    secret_question: Optional[str] = Field(None, max_length=255)
+    claimant_answer: Optional[str] = Field(None, max_length=255)
     turnstile_token: Optional[str] = None
     website: Optional[str] = None  # honeypot
 
@@ -298,6 +337,7 @@ class ClaimPublic(BaseModel):
     id: int
     found_id: int
     status: str
+    handover_code: Optional[str] = None
     created_at: datetime.datetime
 
     class Config:
@@ -309,9 +349,16 @@ class ClaimAdmin(BaseModel):
     match_id: Optional[int]
     claimant_name: str
     claimant_contact: str
+    claimant_department: Optional[str] = None
     proof_text: str
+    secret_question: Optional[str] = None
+    secret_answer: Optional[str] = None
+    claimant_answer: Optional[str] = None
+    proof_image: Optional[str] = None
     status: str
     admin_note: Optional[str]
+    handover_code: Optional[str] = None
+    handover_status: Optional[str] = "pending"
     created_at: datetime.datetime
     decided_at: Optional[datetime.datetime]
     found_item: Optional[ItemAdmin] = None
@@ -320,8 +367,72 @@ class ClaimAdmin(BaseModel):
         from_attributes = True
 
 class ClaimDecision(BaseModel):
-    status: str = Field(..., pattern="^(approved|rejected)$")
+    status: str = Field(..., pattern="^(approved|rejected|more_proof_requested)$")
     admin_note: Optional[str] = Field(None, max_length=500)
+
+class HandoverVerifyRequest(BaseModel):
+    code: str = Field(..., min_length=4, max_length=10)
+    item_id: Optional[int] = None
+    unique_qr_code: Optional[str] = None
+
+# --- Finder Response Schemas (Task 24) ---
+
+class FinderResponseCreate(BaseModel):
+    unique_code: str = Field(..., min_length=3, max_length=50)
+    option_type: str = Field(..., pattern="^(A|B|C)$")
+    message: Optional[str] = Field(None, max_length=1000)
+    found_location: Optional[str] = Field(None, max_length=150)
+    meeting_place: Optional[str] = Field(None, max_length=100)
+    meeting_time: Optional[str] = Field(None, max_length=100)
+    coordinator_id: Optional[int] = None
+    finder_name: Optional[str] = Field(None, max_length=100)
+    finder_mobile: Optional[str] = Field(None, max_length=50)
+    finder_department: Optional[str] = Field(None, max_length=100)
+    consent_given: Optional[bool] = False
+    turnstile_token: Optional[str] = None
+    website: Optional[str] = None  # honeypot
+
+    @field_validator("website")
+    @classmethod
+    def validate_honeypot(cls, v: Optional[str]) -> Optional[str]:
+        if v and len(v.strip()) > 0:
+            raise ValueError("Spam detected")
+        return v
+
+class FinderResponsePublic(BaseModel):
+    id: int
+    unique_code: str
+    option_type: str
+    status: str
+    finder_token: Optional[str] = None
+    message: Optional[str] = None
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+class FinderResponseAdmin(BaseModel):
+    id: int
+    item_id: Optional[int]
+    unique_code: str
+    campus_id: Optional[int]
+    option_type: str
+    message: Optional[str]
+    found_location: Optional[str]
+    photo_path: Optional[str]
+    meeting_place: Optional[str]
+    meeting_time: Optional[str]
+    coordinator_id: Optional[int]
+    coordinator_name: Optional[str] = None
+    finder_name: Optional[str] = None
+    finder_mobile: Optional[str] = None
+    finder_department: Optional[str] = None
+    consent_given: bool = False
+    status: str
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
 
 # --- Admin Auth & Dashboard Schemas ---
 

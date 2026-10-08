@@ -330,6 +330,52 @@ KNOWLEDGE_BASE = [
             "Who are Faculty Coordinators?",
             "How does the Student Dashboard work?"
         ]
+    },
+    {
+        "id": "admin_match_verification",
+        "keywords": "how does admin verify match approve claim review match breakdown why matched side by side comparison handover code reject proof एडमिन मिलान सत्यापन कैसे करता है",
+        "question_en": "How does the admin verify a match?",
+        "topic": "Admin Match Verification",
+        "answers": {
+            "en": "**Admin Match Review & Verification Guide:**\n- **Side-by-Side Comparison**: Admins inspect Lost vs Found reports side by side.\n- **Circular Score & Verdict**: Strong (80%+), Possible (50-79%), Weak (<50%).\n- **Score Breakdown**: Semantic text, image similarity, and attribute & proximity scores.\n- **Why Matched Chips**: Highlights matching attributes (color, brand, location) and penalties for mismatches.\n- **Claim Proof & Secret Question**: Verifies claimant proof, receipt images, and secret question answers.\n- **Decision Actions**: **Approve (Release 4-digit Handover Code)**, **Reject with reason**, or **Ask for More Proof**.",
+            "hi": "**व्यवस्थापक द्वारा मिलान सत्यापन:**\n- खोई और मिली वस्तुओं की तुलना साइड-बाय-साइड की जाती है।\n- स्कोर ब्रेकडाउन: पाठ समानता, दृश्य समानता, विशेषताएँ और निकटता।\n- अनुमोदन पर 4-अंकों का हैंडओवर कोड जारी किया जाता है।",
+            "hinglish": "Admin side-by-side Lost aur Found report compare karta hai, semantic score, visual similarity aur secret answer verify karke handover code approve karta hai."
+        },
+        "suggestions": [
+            "What is the AI Matches list on admin dashboard?",
+            "What happens when someone scans my QR?",
+            "How does the Student Dashboard work?"
+        ]
+    },
+    {
+        "id": "admin_matches_tab",
+        "keywords": "admin matches tab matches list who matched with whom counterpart item pair row review match एडमिन मैच टैब",
+        "question_en": "What is the Matches tab on the College Admin dashboard?",
+        "topic": "Admin Matches Tab",
+        "answers": {
+            "en": "**Admin AI Matches Tab:**\n- Displays all detected lost-and-found pairs for the college with photos, score badges, verdicts, and review buttons.\n- Direct navigation to side-by-side Match Review screen.\n- Multi-tenant campus scoped for full privacy.",
+            "hi": "**एडमिन एआई मिलान टैब:**\n- कॉलेज के सभी जोड़े (खोई व मिली वस्तुएं) फोटो, स्कोर और स्थिति के साथ दिखाता है।",
+            "hinglish": "Admin dashboard ke Matches tab me har Lost item ko uske Found counterpart ke sath pair row me score aur review button ke sath dekha ja sakta hai."
+        },
+        "suggestions": [
+            "How does the admin verify a match?",
+            "How does 'Tag My Item' work?"
+        ]
+    },
+    {
+        "id": "finder_qr_options",
+        "keywords": "i found someone item what should i do scan qr tag finder options message owner faculty coordinator share details मुझे किसी का सामान मिला क्या करूँ",
+        "question_en": "I found someone's item, what should I do?",
+        "topic": "Found Item QR Options",
+        "answers": {
+            "en": "**Finder QR Scan Options:**\nWhen you scan a Khojbeen QR smart tag on a found item, you get 3 privacy-safe choices:\n1. **Message Owner (Anonymous)**: Send a quick message, location, or photo without revealing your identity.\n2. **Hand to Faculty Coordinator / Desk**: Choose a campus coordinator or lost & found desk to deposit the item.\n3. **Share Details with Verification**: Share your name and contact, which is released to the owner only AFTER the college admin approves their claim.",
+            "hi": "**क्यूआर स्कैन करने पर फाइंडर के विकल्प:**\n1. **मालिक को अनाम संदेश भेजें**।\n2. **संकाय समन्वयक / हेल्पडेस्क को सौंपें**।\n3. **सत्यापन के बाद संपर्क साझा करें** (केवल व्यवस्थापक अनुमोदन के बाद)।",
+            "hinglish": "QR tag scan karne par aap 3 safe options chuniye: (A) Anonymous message bhejein, (B) Faculty Coordinator ya desk ko de dein, ya (C) Verification ke baad contact share karein."
+        },
+        "suggestions": [
+            "How do I use the QR Scanner tab?",
+            "How does 'Tag My Item' work?"
+        ]
     }
 ]
 
@@ -414,6 +460,15 @@ def find_best_answer(query: str, language: str = "auto") -> Dict[str, Any]:
         # Priority rules
         if "login" in q_lower or "log in" in q_lower or "लॉगिन" in q_lower or "password" in q_lower or "forgot" in q_lower or "student portal" in q_lower:
             best_idx = id_to_idx.get("student_login", best_idx)
+            confidence = max(confidence, 0.95)
+        elif "verify a match" in q_lower or "admin verify" in q_lower or "handover code" in q_lower or "match review" in q_lower or "सत्यापन" in q_lower:
+            best_idx = id_to_idx.get("admin_match_verification", best_idx)
+            confidence = max(confidence, 0.95)
+        elif "matches tab" in q_lower or "who matched with whom" in q_lower or "matches list" in q_lower or "मैच टैब" in q_lower:
+            best_idx = id_to_idx.get("admin_matches_tab", best_idx)
+            confidence = max(confidence, 0.95)
+        elif "found someone" in q_lower or "what should i do" in q_lower or "finder option" in q_lower or "किसी का सामान मिला" in q_lower:
+            best_idx = id_to_idx.get("finder_qr_options", best_idx)
             confidence = max(confidence, 0.95)
         elif "student dashboard" in q_lower or "डैशबोर्ड" in q_lower or "recover" in q_lower:
             best_idx = id_to_idx.get("student_dashboard", best_idx)

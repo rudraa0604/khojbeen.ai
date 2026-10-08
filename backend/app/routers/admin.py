@@ -5,11 +5,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, or_
 
 from app.db import get_db
-from app.models import Item, Claim, Match, Admin, Campus, User, ScanEvent, FacultyCoordinator, CrossCollegeInquiry, Notification
+from app.models import Item, Claim, Match, Admin, Campus, User, ScanEvent, FacultyCoordinator, CrossCollegeInquiry, Notification, FinderResponse
 from app.schemas import (
     AdminDashboardStats, ClaimAdmin, ClaimDecision, ItemAdmin,
     CollegeSettingsUpdate, CampusPublic, CrossCollegeInquiryPublic, CrossCollegeInquiryReply,
-    StudentResponse, FacultyCoordinatorPublic, FacultyCoordinatorCreate, FacultyCoordinatorUpdate
+    StudentResponse, FacultyCoordinatorPublic, FacultyCoordinatorCreate, FacultyCoordinatorUpdate,
+    AdminMatchPair, AdminMatchesResponse, FinderResponseAdmin
 )
 from app.routers.auth import get_current_admin
 
@@ -146,9 +147,16 @@ def list_all_claims(
                 match_id=c.match_id,
                 claimant_name=c.claimant_name,
                 claimant_contact=c.claimant_contact,
+                claimant_department=getattr(c, "claimant_department", None),
                 proof_text=c.proof_text,
+                secret_question=getattr(c, "secret_question", None),
+                secret_answer=getattr(c, "secret_answer", None),
+                claimant_answer=getattr(c, "claimant_answer", None),
+                proof_image=getattr(c, "proof_image", None),
                 status=c.status,
                 admin_note=c.admin_note,
+                handover_code=getattr(c, "handover_code", None),
+                handover_status=getattr(c, "handover_status", "pending"),
                 created_at=c.created_at,
                 decided_at=c.decided_at,
                 found_item=ItemAdmin.model_validate(found_i) if found_i else None
@@ -177,6 +185,10 @@ def update_claim_status(
     claim.decided_at = datetime.datetime.utcnow()
 
     if decision.status == "approved":
+        import random
+        if not getattr(claim, "handover_code", None):
+            claim.handover_code = str(random.randint(1000, 9999))
+        claim.handover_status = "pending"
         if found_item:
             found_item.status = "closed"
         if claim.match_id:
@@ -201,13 +213,60 @@ def update_claim_status(
         match_id=claim.match_id,
         claimant_name=claim.claimant_name,
         claimant_contact=claim.claimant_contact,
+        claimant_department=getattr(claim, "claimant_department", None),
         proof_text=claim.proof_text,
+        secret_question=getattr(claim, "secret_question", None),
+        secret_answer=getattr(claim, "secret_answer", None),
+        claimant_answer=getattr(claim, "claimant_answer", None),
+        proof_image=getattr(claim, "proof_image", None),
         status=claim.status,
         admin_note=claim.admin_note,
+        handover_code=getattr(claim, "handover_code", None),
+        handover_status=getattr(claim, "handover_status", "pending"),
         created_at=claim.created_at,
         decided_at=claim.decided_at,
         found_item=ItemAdmin.model_validate(found_item) if found_item else None
     )
+
+@router.get("/finder-responses", response_model=List[FinderResponseAdmin])
+def list_admin_finder_responses(
+    current_admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Lists finder responses scoped strictly to the admin's campus.
+    """
+    responses_q = db.query(FinderResponse)
+    if current_admin.role != "super_admin" and current_admin.campus_id:
+        responses_q = responses_q.filter(FinderResponse.campus_id == current_admin.campus_id)
+
+    responses = responses_q.order_by(desc(FinderResponse.created_at)).all()
+    res = []
+    for r in responses:
+        coord = db.query(FacultyCoordinator).filter(FacultyCoordinator.id == r.coordinator_id).first() if r.coordinator_id else None
+        res.append(
+            FinderResponseAdmin(
+                id=r.id,
+                item_id=r.item_id,
+                unique_code=r.unique_code,
+                campus_id=r.campus_id,
+                option_type=r.option_type,
+                message=r.message,
+                found_location=r.found_location,
+                photo_path=r.photo_path,
+                meeting_place=r.meeting_place,
+                meeting_time=r.meeting_time,
+                coordinator_id=r.coordinator_id,
+                coordinator_name=coord.name if coord else None,
+                finder_name=r.finder_name,
+                finder_mobile=r.finder_mobile,
+                finder_department=r.finder_department,
+                consent_given=r.consent_given,
+                status=r.status,
+                created_at=r.created_at
+            )
+        )
+    return res
 
 @router.get("/items", response_model=List[ItemAdmin])
 def list_admin_items(
@@ -482,3 +541,302 @@ def reply_to_inquiry(
     db.commit()
     db.refresh(inquiry)
     return {"status": "success", "message": "Inquiry updated successfully", "inquiry_id": inquiry.id}
+
+def format_admin_item(item: Item, db: Session, current_admin: Admin) -> ItemAdmin:
+    campus_name = "Unknown Campus"
+    campus_logo = None
+    campus_city = None
+    if item.campus_id:
+        c = db.query(Campus).filter(Campus.id == item.campus_id).first()
+        if c:
+            campus_name = c.name
+            campus_logo = c.logo_url
+            campus_city = c.city
+
+    # Check privacy scoping: if item belongs to another campus and admin is not super_admin,
+    # mask direct contact details
+    is_same_campus = (current_admin.role == "super_admin") or (current_admin.campus_id == item.campus_id)
+    contact_name = item.contact_name if is_same_campus else f"Desk Coordinator ({campus_name})"
+    contact_info = item.contact_email_or_phone if is_same_campus else "Protected by Cross-College Privacy"
+
+    return ItemAdmin(
+        id=item.id,
+        campus_id=item.campus_id,
+        campus_name=campus_name,
+        campus_logo=campus_logo,
+        campus_city=campus_city,
+        user_id=item.user_id if is_same_campus else None,
+        unique_qr_code=item.unique_qr_code,
+        type=item.type,
+        title=item.title,
+        description=item.description,
+        category=item.category,
+        brand=item.brand,
+        color=item.color,
+        finder_note=item.finder_note,
+        is_tagged=item.is_tagged,
+        location=item.location,
+        event_date=item.event_date.date() if isinstance(item.event_date, datetime.datetime) else item.event_date,
+        image_path=item.image_path,
+        thumbnail_path=item.thumbnail_path,
+        contact_name=contact_name,
+        contact_email_or_phone=contact_info,
+        status=item.status,
+        created_at=item.created_at
+    )
+
+def format_admin_match(match: Match, db: Session, current_admin: Admin) -> Optional[AdminMatchPair]:
+    lost_i = db.query(Item).filter(Item.id == match.lost_id).first()
+    found_i = db.query(Item).filter(Item.id == match.found_id).first()
+    if not lost_i or not found_i:
+        return None
+
+    # Multi-tenant scoping: College Admin can only see matches where either lost or found belongs to their campus
+    if current_admin.role != "super_admin" and current_admin.campus_id is not None:
+        if lost_i.campus_id != current_admin.campus_id and found_i.campus_id != current_admin.campus_id:
+            return None
+
+    score = round(match.score, 1)
+    if score >= 80.0:
+        verdict = "Strong"
+        label = "High"
+    elif score >= 50.0:
+        verdict = "Possible"
+        label = "Medium"
+    else:
+        verdict = "Weak"
+        label = "Low"
+
+    # Associated claim
+    claim = db.query(Claim).filter(
+        or_(
+            Claim.match_id == match.id,
+            Claim.found_id == found_i.id
+        )
+    ).order_by(desc(Claim.created_at)).first()
+
+    has_claim = claim is not None
+    claim_id = claim.id if claim else None
+    claim_status = claim.status if claim else None
+
+    # Match status
+    if claim:
+        if claim.status == "approved":
+            status_val = "approved"
+        elif claim.status == "rejected":
+            status_val = "rejected"
+        else:
+            status_val = "claimed"
+    elif lost_i.status == "closed" or found_i.status == "closed":
+        status_val = "closed"
+    elif score >= 80.0 or match.text_score >= 0.6:
+        status_val = "under_review"
+    else:
+        status_val = "new"
+
+    # QR confirmed
+    is_qr_confirmed = bool(
+        lost_i.is_tagged or found_i.is_tagged or 
+        (lost_i.unique_qr_code and found_i.unique_qr_code and lost_i.unique_qr_code == found_i.unique_qr_code) or
+        db.query(ScanEvent).filter(ScanEvent.item_id == found_i.id).first() is not None
+    )
+
+    reasons_list = []
+    penalties_list = []
+
+    # Brand check
+    if lost_i.brand and found_i.brand:
+        if lost_i.brand.strip().lower() == found_i.brand.strip().lower():
+            reasons_list.append(f"Same brand ({lost_i.brand})")
+        else:
+            penalties_list.append(f"Different brand ({lost_i.brand} vs {found_i.brand})")
+    elif lost_i.brand or found_i.brand:
+        reasons_list.append(f"Brand identified ({lost_i.brand or found_i.brand})")
+
+    # Color check
+    if lost_i.color and found_i.color:
+        if lost_i.color.strip().lower() == found_i.color.strip().lower():
+            reasons_list.append(f"Same color ({lost_i.color})")
+        else:
+            penalties_list.append(f"Different color ({lost_i.color} vs {found_i.color})")
+
+    # Category
+    if match.category_score >= 1.0:
+        reasons_list.append("Identical category")
+    
+    # Location
+    if match.location_score >= 1.0:
+        reasons_list.append(f"Same location ({lost_i.location})")
+    elif match.location_score >= 0.5:
+        reasons_list.append("Same campus zone")
+    else:
+        penalties_list.append(f"Different campus spots ({lost_i.location} vs {found_i.location})")
+
+    # Date
+    if match.date_score >= 0.8:
+        reasons_list.append("Reported within 24-48 hours")
+    elif match.date_score >= 0.4:
+        reasons_list.append("Reported within a few days")
+    else:
+        penalties_list.append("Date gap over 1 week")
+
+    # Semantic & Image
+    if match.has_image_match and match.image_score and match.image_score >= 0.6:
+        reasons_list.append(f"Visual photo match ({int(match.image_score * 100)}%)")
+    if match.text_score >= 0.6:
+        reasons_list.append("High semantic text similarity")
+
+    if is_qr_confirmed:
+        reasons_list.insert(0, "QR Smart Tag Confirmed")
+
+    import re
+    stop_words = {"the", "a", "an", "and", "or", "in", "on", "at", "to", "for", "with", "is", "was", "it", "my", "of", "from", "left", "found", "lost", "this"}
+    words_lost = set(w.lower() for w in re.findall(r"\w+", f"{lost_i.title} {lost_i.description}") if len(w) > 2 and w.lower() not in stop_words)
+    words_found = set(w.lower() for w in re.findall(r"\w+", f"{found_i.title} {found_i.description}") if len(w) > 2 and w.lower() not in stop_words)
+    common_keywords = sorted(list(words_lost.intersection(words_found)))
+
+    why_str = ", ".join(reasons_list) if reasons_list else "General semantic match"
+
+    return AdminMatchPair(
+        id=match.id,
+        lost_id=lost_i.id,
+        found_id=found_i.id,
+        score=score,
+        verdict=verdict,
+        label=label,
+        status=status_val,
+        text_score=round(match.text_score, 3),
+        image_score=round(match.image_score, 3) if match.image_score is not None else None,
+        has_image_match=match.has_image_match,
+        category_score=round(match.category_score, 3),
+        location_score=round(match.location_score, 3),
+        date_score=round(match.date_score, 3),
+        why_matched=why_str,
+        reasons_list=reasons_list,
+        penalties_list=penalties_list,
+        matching_keywords=common_keywords[:8],
+        lost_item=format_admin_item(lost_i, db, current_admin),
+        found_item=format_admin_item(found_i, db, current_admin),
+        has_claim=has_claim,
+        claim_id=claim_id,
+        claim_status=claim_status,
+        is_qr_confirmed=is_qr_confirmed,
+        created_at=match.created_at
+    )
+
+@router.get("/matches", response_model=AdminMatchesResponse)
+def get_admin_matches(
+    status: Optional[str] = Query("all", description="Status filter: all, new, under_review, claimed, approved, rejected, closed"),
+    verdict: Optional[str] = Query("all", description="Verdict filter: all, strong, possible, weak"),
+    category: Optional[str] = Query("all", description="Category filter"),
+    search: Optional[str] = Query(None, description="Search keyword"),
+    sort: Optional[str] = Query("score", description="Sort by score or date"),
+    current_admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    campus_id = current_admin.campus_id if current_admin.role != "super_admin" else None
+
+    # Base query for all matches
+    all_matches_db = db.query(Match).order_by(desc(Match.score)).all()
+
+    formatted_matches: List[AdminMatchPair] = []
+    strong_count = 0
+    possible_count = 0
+    weak_count = 0
+
+    for m in all_matches_db:
+        pair = format_admin_match(m, db, current_admin)
+        if not pair:
+            continue
+
+        if pair.verdict == "Strong":
+            strong_count += 1
+        elif pair.verdict == "Possible":
+            possible_count += 1
+        else:
+            weak_count += 1
+
+        # Apply status filter
+        if status and status != "all":
+            if pair.status.lower() != status.lower():
+                continue
+
+        # Apply verdict filter
+        if verdict and verdict != "all":
+            if pair.verdict.lower() != verdict.lower():
+                continue
+
+        # Apply category filter
+        if category and category != "all":
+            if pair.lost_item.category.lower() != category.lower() and pair.found_item.category.lower() != category.lower():
+                continue
+
+        # Apply search filter
+        if search and search.strip():
+            s = search.strip().lower()
+            text_corpus = f"{pair.lost_item.title} {pair.lost_item.description} {pair.found_item.title} {pair.found_item.description}".lower()
+            if s not in text_corpus:
+                continue
+
+        formatted_matches.append(pair)
+
+    # Sort
+    if sort == "date":
+        formatted_matches.sort(key=lambda x: x.created_at, reverse=True)
+    else:
+        formatted_matches.sort(key=lambda x: x.score, reverse=True)
+
+    return AdminMatchesResponse(
+        matches=formatted_matches,
+        total=len(formatted_matches),
+        strong_count=strong_count,
+        possible_count=possible_count,
+        weak_count=weak_count
+    )
+
+@router.get("/matches/{match_id}", response_model=AdminMatchPair)
+def get_admin_match_detail(
+    match_id: int,
+    current_admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    m = db.query(Match).filter(Match.id == match_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Match not found")
+
+    pair = format_admin_match(m, db, current_admin)
+    if not pair:
+        raise HTTPException(status_code=403, detail="Not authorized to access matches outside your campus")
+
+    return pair
+
+@router.get("/items/{item_id}/matches", response_model=List[AdminMatchPair])
+def get_admin_item_matches(
+    item_id: int,
+    current_admin: Admin = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    target_item = db.query(Item).filter(Item.id == item_id).first()
+    if not target_item:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    # Campus permission check
+    if current_admin.role != "super_admin" and current_admin.campus_id is not None:
+        if target_item.campus_id != current_admin.campus_id:
+            raise HTTPException(status_code=403, detail="Not authorized to access items from another campus")
+
+    matches_db = db.query(Match).filter(
+        or_(
+            Match.lost_id == item_id,
+            Match.found_id == item_id
+        )
+    ).order_by(desc(Match.score)).all()
+
+    res = []
+    for m in matches_db:
+        pair = format_admin_match(m, db, current_admin)
+        if pair:
+            res.append(pair)
+
+    return res
+

@@ -1,22 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, Link, useLocation, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { 
   Shield, CheckCircle, XCircle, LogOut, Package, RefreshCw, 
   Search, AlertCircle, FileCheck, Layers, Eye, Phone, Mail, User, 
   Check, Users, QrCode, MessageSquare, Settings, Share2, Megaphone, 
-  Trash2, Filter, ChevronRight, UserX, UserCheck, Clock, Building,
-  Plus, Edit3, MapPin, PlusCircle
+  Trash2, Filter, ChevronRight, ChevronLeft, UserX, UserCheck, Clock, Building,
+  Plus, Edit3, MapPin, PlusCircle, Sparkles, ArrowUpRight, ArrowLeftRight, HelpCircle
 } from 'lucide-react';
 import SEO from '../components/SEO';
 import StatusBadge from '../components/StatusBadge';
 import Toast from '../components/Toast';
 import AnimatedSection from '../components/AnimatedSection';
+import MatchReviewModal from '../components/MatchReviewModal';
 import { api } from '../lib/api';
 
 export default function AdminDashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { matchId: routeMatchId } = useParams();
   const [token, setToken] = useState(null);
   const [username, setUsername] = useState('');
   const [role, setRole] = useState('college_admin');
@@ -29,6 +32,9 @@ export default function AdminDashboard() {
   const [inquiries, setInquiries] = useState([]);
   const [scanLogs, setScanLogs] = useState([]);
   const [coordinators, setCoordinators] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [selectedMatch, setSelectedMatch] = useState(null);
+
   const [collegeSettings, setCollegeSettings] = useState({
     name: '',
     logo_url: '',
@@ -38,12 +44,20 @@ export default function AdminDashboard() {
   });
 
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview'); // overview | reports | claims | students | inquiries | coordinators | scanLogs | settings
+  const [activeTab, setActiveTab] = useState('overview'); // overview | reports | matches | claims | students | inquiries | coordinators | scanLogs | settings
 
   // Filter & Search states for reports
   const [reportTypeFilter, setReportTypeFilter] = useState('all');
   const [reportStatusFilter, setReportStatusFilter] = useState('all');
+  const [reportMatchedFilter, setReportMatchedFilter] = useState('all'); // all | matched_only | not_matched
   const [reportSearch, setReportSearch] = useState('');
+
+  // Filter & Search states for matches tab
+  const [matchVerdictFilter, setMatchVerdictFilter] = useState('all');
+  const [matchStatusFilter, setMatchStatusFilter] = useState('all');
+  const [matchCategoryFilter, setMatchCategoryFilter] = useState('all');
+  const [matchSearch, setMatchSearch] = useState('');
+  const [matchSort, setMatchSort] = useState('score'); // score | date
 
   // Modals & Action states
   const [toast, setToast] = useState(null);
@@ -54,6 +68,7 @@ export default function AdminDashboard() {
   const [processing, setProcessing] = useState(false);
   const [submittingCoord, setSubmittingCoord] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const tabsScrollRef = useRef(null);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('khojbeen_admin_token') || sessionStorage.getItem('khojbeen_admin_token');
@@ -76,12 +91,13 @@ export default function AdminDashboard() {
   const loadData = async (authToken) => {
     setLoading(true);
     try {
-      const [dashStats, allItems, studentList, inquiryList, scans] = await Promise.all([
+      const [dashStats, allItems, studentList, inquiryList, scans, matchesData] = await Promise.all([
         api.getAdminDashboard(authToken),
         api.getAdminItems({}, authToken),
         api.getAdminStudents(authToken).catch(() => []),
         api.getAdminInquiries(authToken).catch(() => []),
         api.getAdminScanLogs(authToken).catch(() => []),
+        api.getAdminMatches({}, authToken).catch(() => ({ matches: [] })),
       ]);
 
       setStats(dashStats);
@@ -89,6 +105,7 @@ export default function AdminDashboard() {
       setStudents(studentList || []);
       setInquiries(inquiryList || []);
       setScanLogs(scans || []);
+      setMatches(matchesData?.matches || []);
 
       // Load coordinators for this campus
       if (dashStats?.campus_id) {
@@ -144,6 +161,72 @@ export default function AdminDashboard() {
       loadData(token);
     }
   }, [token]);
+
+  // Handle direct tab and match_id URL query / route params
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const tabParam = params.get('tab');
+    const matchIdParam = routeMatchId || params.get('match_id');
+
+    if (location.pathname.startsWith('/admin/matches') || tabParam === 'matches') {
+      setActiveTab('matches');
+    } else if (tabParam) {
+      setActiveTab(tabParam);
+    }
+
+    if (matchIdParam && token) {
+      api.getAdminMatchDetail(matchIdParam, token).then(m => {
+        if (m) {
+          setSelectedMatch(m);
+          setActiveTab('matches');
+        }
+      }).catch(console.error);
+    }
+  }, [location.pathname, location.search, routeMatchId, token]);
+
+  // Map each item ID to its list of counterpart matches
+  const itemMatchesMap = useMemo(() => {
+    const map = {};
+    matches.forEach((m) => {
+      if (m.lost_id) {
+        if (!map[m.lost_id]) map[m.lost_id] = [];
+        map[m.lost_id].push({
+          match_id: m.id,
+          counterpart_id: m.found_id,
+          counterpart_title: m.found_item?.title,
+          counterpart_type: 'found',
+          counterpart_campus: m.found_item?.campus_name,
+          score: m.score,
+          verdict: m.verdict,
+          match_obj: m
+        });
+      }
+      if (m.found_id) {
+        if (!map[m.found_id]) map[m.found_id] = [];
+        map[m.found_id].push({
+          match_id: m.id,
+          counterpart_id: m.lost_id,
+          counterpart_title: m.lost_item?.title,
+          counterpart_type: 'lost',
+          counterpart_campus: m.lost_item?.campus_name,
+          score: m.score,
+          verdict: m.verdict,
+          match_obj: m
+        });
+      }
+    });
+    Object.keys(map).forEach((k) => {
+      map[k].sort((a, b) => b.score - a.score);
+    });
+    return map;
+  }, [matches]);
+
+  const handleScrollTabs = (direction) => {
+    if (tabsScrollRef.current) {
+      const scrollAmount = direction === 'left' ? -200 : 200;
+      tabsScrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
 
   const handleLogout = () => {
     sessionStorage.clear();
@@ -306,17 +389,45 @@ export default function AdminDashboard() {
     }
   };
 
-  // Filtered items
+  // Filtered items (Manage Reports)
   const filteredItems = items.filter((item) => {
     const matchesType = reportTypeFilter === 'all' || item.type === reportTypeFilter;
     const matchesStatus = reportStatusFilter === 'all' || item.status === reportStatusFilter;
+    const hasMatches = Boolean(itemMatchesMap[item.id] && itemMatchesMap[item.id].length > 0) || item.status === 'matched';
+    const matchesMatchedFilter = 
+      reportMatchedFilter === 'all' ||
+      (reportMatchedFilter === 'matched_only' && hasMatches) ||
+      (reportMatchedFilter === 'not_matched' && !hasMatches);
     const matchesSearch =
       !reportSearch ||
       item.title?.toLowerCase().includes(reportSearch.toLowerCase()) ||
       item.description?.toLowerCase().includes(reportSearch.toLowerCase()) ||
       item.contact_name?.toLowerCase().includes(reportSearch.toLowerCase());
-    return matchesType && matchesStatus && matchesSearch;
+    return matchesType && matchesStatus && matchesMatchedFilter && matchesSearch;
   });
+
+  // Filtered matches (Matches Tab)
+  const filteredMatches = useMemo(() => {
+    return matches.filter((m) => {
+      const matchVerdict = matchVerdictFilter === 'all' || m.verdict?.toLowerCase() === matchVerdictFilter.toLowerCase();
+      const matchStatus = matchStatusFilter === 'all' || m.status?.toLowerCase() === matchStatusFilter.toLowerCase();
+      const matchCat = matchCategoryFilter === 'all' || 
+        m.lost_item?.category?.toLowerCase() === matchCategoryFilter.toLowerCase() ||
+        m.found_item?.category?.toLowerCase() === matchCategoryFilter.toLowerCase();
+      const searchStr = matchSearch.trim().toLowerCase();
+      const matchSearchOk = !searchStr || 
+        m.lost_item?.title?.toLowerCase().includes(searchStr) ||
+        m.lost_item?.description?.toLowerCase().includes(searchStr) ||
+        m.found_item?.title?.toLowerCase().includes(searchStr) ||
+        m.found_item?.description?.toLowerCase().includes(searchStr);
+      return matchVerdict && matchStatus && matchCat && matchSearchOk;
+    }).sort((a, b) => {
+      if (matchSort === 'date') {
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      }
+      return (b.score || 0) - (a.score || 0);
+    });
+  }, [matches, matchVerdictFilter, matchStatusFilter, matchCategoryFilter, matchSearch, matchSort]);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 pb-16 transition-colors duration-200">
@@ -390,44 +501,70 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto scrollbar-none border-t border-slate-100 dark:border-slate-800/60 pt-1">
-          {[
-            { id: 'overview', label: 'Overview & Stats', icon: Layers },
-            { id: 'reports', label: `Manage Reports (${items.length})`, icon: Package },
-            { id: 'claims', label: `Pending Claims (${stats?.pending_claims_count || 0})`, icon: FileCheck, badge: stats?.pending_claims_count },
-            { id: 'coordinators', label: `Faculty Coordinators (${coordinators.length})`, icon: UserCheck },
-            { id: 'students', label: `Students (${students.length})`, icon: Users },
-            { id: 'inquiries', label: `Inquiries (${inquiries.length})`, icon: MessageSquare, badge: inquiries.filter(i => i.status === 'pending').length },
-            { id: 'scanLogs', label: `QR Scans (${scanLogs.length})`, icon: QrCode },
-            { id: 'settings', label: 'College Profile', icon: Settings },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`py-2.5 px-3.5 text-xs font-bold rounded-lg whitespace-nowrap transition-colors flex items-center gap-2 border-b-2 ${
-                  isActive
-                    ? 'border-teal-600 text-teal-800 dark:text-teal-300 bg-teal-50/50 dark:bg-teal-950/30'
-                    : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/40'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {Boolean(tab.badge) && (
-                  <span className="w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-extrabold flex items-center justify-center">
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        {/* Tab Navigation with horizontal scrolling & fade edges */}
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center border-t border-slate-100 dark:border-slate-800/60 pt-1">
+          <button 
+            type="button"
+            onClick={() => handleScrollTabs('left')}
+            className="hidden sm:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0 mr-1"
+            aria-label="Scroll tabs left"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+
+          <div 
+            ref={tabsScrollRef}
+            className="flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none scroll-smooth py-1"
+          >
+            {[
+              { id: 'overview', label: 'Overview & Stats', icon: Layers },
+              { id: 'reports', label: `Manage Reports (${items.length})`, icon: Package },
+              { id: 'matches', label: `Matches (${matches.length})`, icon: Sparkles, badge: matches.filter(m => m.status === 'new' || m.status === 'under_review').length },
+              { id: 'claims', label: `Pending Claims (${stats?.pending_claims_count || 0})`, icon: FileCheck, badge: stats?.pending_claims_count },
+              { id: 'coordinators', label: `Faculty Coordinators (${coordinators.length})`, icon: UserCheck },
+              { id: 'students', label: `Students (${students.length})`, icon: Users },
+              { id: 'inquiries', label: `Inquiries (${inquiries.length})`, icon: MessageSquare, badge: inquiries.filter(i => i.status === 'pending').length },
+              { id: 'scanLogs', label: `QR Scans (${scanLogs.length})`, icon: QrCode },
+              { id: 'settings', label: 'College Profile', icon: Settings },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`py-2 px-3 sm:px-3.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0 ${
+                    isActive
+                      ? 'bg-teal-700 text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{tab.label}</span>
+                  {Boolean(tab.badge) && (
+                    <span className={`w-4 h-4 rounded-full text-[10px] font-extrabold flex items-center justify-center shrink-0 ${
+                      isActive ? 'bg-white text-teal-800' : 'bg-amber-500 text-white'
+                    }`}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <button 
+            type="button"
+            onClick={() => handleScrollTabs('right')}
+            className="hidden sm:flex p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0 ml-1"
+            aria-label="Scroll tabs right"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-28 sm:pb-36 space-y-6">
         
         {/* TAB 1: OVERVIEW & STATS */}
         {activeTab === 'overview' && (
@@ -444,24 +581,73 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* KPI Stat Cards */}
+            {/* Interactive KPI Stat Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
               {[
-                { label: 'Total Reports', val: stats?.total_items || 0, color: 'text-slate-900 dark:text-slate-100' },
-                { label: 'Open Lost', val: stats?.open_lost || 0, color: 'text-rose-600 dark:text-rose-400' },
-                { label: 'Open Found', val: stats?.open_found || 0, color: 'text-emerald-600 dark:text-emerald-400' },
-                { label: 'AI Matched', val: stats?.matched_count || 0, color: 'text-teal-700 dark:text-teal-400' },
-                { label: 'Claimed', val: stats?.claimed_count || 0, color: 'text-amber-600 dark:text-amber-400' },
-                { label: 'Closed/Resolved', val: stats?.closed_count || 0, color: 'text-slate-600 dark:text-slate-400' },
-                { label: 'Active Students', val: stats?.active_students_count || 0, color: 'text-cyan-600 dark:text-cyan-400' },
-                { label: 'QR Scan Events', val: stats?.qr_scans_count || 0, color: 'text-indigo-600 dark:text-indigo-400' },
+                { 
+                  label: 'Total Reports', 
+                  val: stats?.total_items || items.length || 0, 
+                  color: 'text-slate-900 dark:text-slate-100',
+                  action: () => { setActiveTab('reports'); setReportTypeFilter('all'); setReportStatusFilter('all'); setReportMatchedFilter('all'); }
+                },
+                { 
+                  label: 'Open Lost', 
+                  val: stats?.open_lost || 0, 
+                  color: 'text-rose-600 dark:text-rose-400',
+                  action: () => { setActiveTab('reports'); setReportTypeFilter('lost'); setReportStatusFilter('open'); setReportMatchedFilter('all'); }
+                },
+                { 
+                  label: 'Open Found', 
+                  val: stats?.open_found || 0, 
+                  color: 'text-emerald-600 dark:text-emerald-400',
+                  action: () => { setActiveTab('reports'); setReportTypeFilter('found'); setReportStatusFilter('open'); setReportMatchedFilter('all'); }
+                },
+                { 
+                  label: 'AI Matched', 
+                  val: stats?.matched_count || matches.length || 0, 
+                  color: 'text-teal-700 dark:text-teal-400',
+                  action: () => { setActiveTab('matches'); setMatchVerdictFilter('all'); setMatchStatusFilter('all'); }
+                },
+                { 
+                  label: 'Claimed', 
+                  val: stats?.claimed_count || stats?.pending_claims_count || 0, 
+                  color: 'text-amber-600 dark:text-amber-400',
+                  action: () => { setActiveTab('claims'); }
+                },
+                { 
+                  label: 'Closed/Resolved', 
+                  val: stats?.closed_count || 0, 
+                  color: 'text-slate-600 dark:text-slate-400',
+                  action: () => { setActiveTab('reports'); setReportStatusFilter('closed'); setReportMatchedFilter('all'); }
+                },
+                { 
+                  label: 'Active Students', 
+                  val: stats?.active_students_count || students.length || 0, 
+                  color: 'text-cyan-600 dark:text-cyan-400',
+                  action: () => { setActiveTab('students'); }
+                },
+                { 
+                  label: 'QR Scan Events', 
+                  val: stats?.qr_scans_count || scanLogs.length || 0, 
+                  color: 'text-indigo-600 dark:text-indigo-400',
+                  action: () => { setActiveTab('scanLogs'); }
+                },
               ].map((c, idx) => (
-                <div key={idx} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs text-center space-y-1">
-                  <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block truncate">
-                    {c.label}
-                  </span>
-                  <p className={`text-2xl font-black ${c.color}`}>{c.val}</p>
-                </div>
+                <button
+                  key={idx}
+                  onClick={c.action}
+                  tabIndex={0}
+                  className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-teal-500 hover:shadow-md hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-teal-500 text-center transition-all cursor-pointer group flex flex-col justify-between items-center min-h-[102px] w-full"
+                  aria-label={`Open ${c.label} tab`}
+                >
+                  <div className="flex items-start justify-between w-full gap-1">
+                    <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex-1 text-center line-clamp-2 leading-tight min-h-[28px] flex items-center justify-center">
+                      {c.label}
+                    </span>
+                    <ArrowUpRight className="w-3 h-3 text-slate-400 group-hover:text-teal-600 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform shrink-0 mt-0.5" />
+                  </div>
+                  <p className={`text-2xl font-black ${c.color} my-auto`}>{c.val}</p>
+                </button>
               ))}
             </div>
 
@@ -525,21 +711,267 @@ export default function AdminDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-2.5">
-                    {stats.recent_activity.map((act) => (
-                      <div key={act.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${act.type === 'lost' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                          <span className="font-bold text-slate-900 dark:text-slate-100">{act.title}</span>
-                          <span className="text-slate-400 font-mono text-[10px]">({act.category})</span>
+                    {stats.recent_activity.map((act) => {
+                      const rawItemId = parseInt(String(act.id).replace('item-', ''), 10);
+                      const actMatches = rawItemId && itemMatchesMap[rawItemId];
+                      return (
+                        <div key={act.id} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between text-xs hover:bg-slate-100/70 dark:hover:bg-slate-800 transition-colors">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${act.type === 'lost' ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                            <span className="font-bold text-slate-900 dark:text-slate-100 truncate">{act.title}</span>
+                            <span className="text-slate-400 font-mono text-[10px] shrink-0">({act.category})</span>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {actMatches && actMatches.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedMatch(actMatches[0].match_obj)}
+                                className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800 dark:bg-teal-950 dark:text-teal-300 hover:bg-teal-200 transition-colors flex items-center gap-1"
+                                title="View AI Match"
+                              >
+                                <Sparkles className="w-3 h-3 text-teal-600" />
+                                <span>{Math.round(actMatches[0].score)}% Matched</span>
+                              </button>
+                            )}
+                            <StatusBadge 
+                              status={act.status} 
+                              className={actMatches && actMatches.length > 0 ? 'cursor-pointer hover:opacity-80' : ''}
+                              onClick={() => {
+                                if (actMatches && actMatches.length > 0) {
+                                  setSelectedMatch(actMatches[0].match_obj);
+                                }
+                              }}
+                            />
+                          </div>
                         </div>
-                        <StatusBadge status={act.status} />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
             </div>
           </AnimatedSection>
+        )}
+
+        {/* TAB: MATCHES (WHO MATCHED WITH WHOM) */}
+        {activeTab === 'matches' && (
+          <div className="space-y-4">
+            
+            {/* Quick Verdict Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button
+                type="button"
+                onClick={() => setMatchVerdictFilter(matchVerdictFilter === 'Strong' ? 'all' : 'Strong')}
+                className={`p-3.5 rounded-2xl border text-left transition-all ${
+                  matchVerdictFilter === 'Strong'
+                    ? 'bg-emerald-100/70 dark:bg-emerald-950/70 border-emerald-500 shadow-sm ring-2 ring-emerald-500/30'
+                    : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50 hover:bg-emerald-100/40'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-300 block">Strong Matches (80%+)</span>
+                    <span className="text-[11px] text-emerald-700 dark:text-emerald-400">High confidence automated pairs</span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-600 text-white font-black text-xs">
+                    {matches.filter(m => m.verdict === 'Strong').length}
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMatchVerdictFilter(matchVerdictFilter === 'Possible' ? 'all' : 'Possible')}
+                className={`p-3.5 rounded-2xl border text-left transition-all ${
+                  matchVerdictFilter === 'Possible'
+                    ? 'bg-amber-100/70 dark:bg-amber-950/70 border-amber-500 shadow-sm ring-2 ring-amber-500/30'
+                    : 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50 hover:bg-amber-100/40'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-amber-900 dark:text-amber-300 block">Possible Matches (50-79%)</span>
+                    <span className="text-[11px] text-amber-700 dark:text-amber-400">Moderate similarity candidates</span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-amber-600 text-white font-black text-xs">
+                    {matches.filter(m => m.verdict === 'Possible').length}
+                  </span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMatchVerdictFilter(matchVerdictFilter === 'Weak' ? 'all' : 'Weak')}
+                className={`p-3.5 rounded-2xl border text-left transition-all ${
+                  matchVerdictFilter === 'Weak'
+                    ? 'bg-rose-100/70 dark:bg-rose-950/70 border-rose-500 shadow-sm ring-2 ring-rose-500/30'
+                    : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50 hover:bg-rose-100/40'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-rose-900 dark:text-rose-300 block">Weak Matches (&lt;50%)</span>
+                    <span className="text-[11px] text-rose-700 dark:text-rose-400">Low similarity or partial attributes</span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-rose-600 text-white font-black text-xs">
+                    {matches.filter(m => m.verdict === 'Weak').length}
+                  </span>
+                </div>
+              </button>
+            </div>
+
+            {/* Filter Controls Bar */}
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                <Search className="w-4 h-4 text-slate-400 ml-2" />
+                <input
+                  type="text"
+                  value={matchSearch}
+                  onChange={(e) => setMatchSearch(e.target.value)}
+                  placeholder="Search matches by lost/found item title, brand, or keywords..."
+                  className="w-full py-1.5 px-2 bg-transparent text-xs text-slate-900 dark:text-slate-100 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap text-xs">
+                <select
+                  value={matchVerdictFilter}
+                  onChange={(e) => setMatchVerdictFilter(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-bold"
+                >
+                  <option value="all">All Verdicts</option>
+                  <option value="Strong">Strong (80%+)</option>
+                  <option value="Possible">Possible (50-79%)</option>
+                  <option value="Weak">Weak (&lt;50%)</option>
+                </select>
+
+                <select
+                  value={matchStatusFilter}
+                  onChange={(e) => setMatchStatusFilter(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-bold"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="new">New</option>
+                  <option value="under_review">Under Review</option>
+                  <option value="claimed">Claimed</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="closed">Closed</option>
+                </select>
+
+                <select
+                  value={matchSort}
+                  onChange={(e) => setMatchSort(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-bold"
+                >
+                  <option value="score">Sort: Highest Match Score First</option>
+                  <option value="date">Sort: Most Recent First</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Matches Pair Rows List */}
+            <div className="space-y-3">
+              {filteredMatches.length === 0 ? (
+                <div className="p-12 text-center text-xs text-slate-400 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-2">
+                  <Sparkles className="w-8 h-8 mx-auto text-teal-600 mb-1 opacity-50" />
+                  <p className="font-bold text-slate-700 dark:text-slate-300 text-sm">No matched item pairs found</p>
+                  <p className="text-slate-500 dark:text-slate-400">Try adjusting your filters or keyword search above.</p>
+                </div>
+              ) : (
+                filteredMatches.map((m) => {
+                  const isStrong = m.score >= 80;
+                  const isPossible = m.score >= 50 && m.score < 80;
+                  const chipColor = isStrong 
+                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                    : isPossible
+                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                    : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-rose-300 dark:border-rose-800';
+
+                  return (
+                    <div
+                      key={m.id}
+                      onClick={() => setSelectedMatch(m)}
+                      className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs hover:border-teal-500 hover:shadow-md transition-all cursor-pointer flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 group"
+                    >
+                      {/* Left: Lost Item */}
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-14 h-14 rounded-xl bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
+                          {m.lost_item?.image_path ? (
+                            <img src={m.lost_item.image_path} alt={m.lost_item.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-400 text-[9px] font-bold">Lost</div>
+                          )}
+                        </div>
+                        <div className="min-w-0 space-y-0.5">
+                          <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300">
+                            Lost #{m.lost_item?.id}
+                          </span>
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-teal-600 transition-colors">
+                            {m.lost_item?.title}
+                          </h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {m.lost_item?.location} • {m.lost_item?.category}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Center: Match Indicator & Score */}
+                      <div className="flex flex-col items-center justify-center shrink-0 px-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-2">
+                          <ArrowLeftRight className="w-4 h-4 text-slate-400 group-hover:text-teal-600 transition-colors" />
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-black border ${chipColor}`}>
+                            {Math.round(m.score)}% {m.verdict}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-semibold mt-1">
+                          {m.why_matched ? m.why_matched.split(',')[0] : 'Semantic Match'}
+                        </span>
+                      </div>
+
+                      {/* Right: Found Item */}
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-14 h-14 rounded-xl bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
+                          {m.found_item?.image_path ? (
+                            <img src={m.found_item.image_path} alt={m.found_item.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-slate-400 text-[9px] font-bold">Found</div>
+                          )}
+                        </div>
+                        <div className="min-w-0 space-y-0.5">
+                          <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                            Found #{m.found_item?.id}
+                          </span>
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-teal-600 transition-colors">
+                            {m.found_item?.title}
+                          </h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            {m.found_item?.location} • {m.found_item?.category}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Action & Status */}
+                      <div className="flex items-center gap-3 shrink-0 justify-end pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100 dark:border-slate-800">
+                        <StatusBadge status={m.status} />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedMatch(m);
+                          }}
+                          className="px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-xs transition-colors flex items-center gap-1"
+                        >
+                          <span>Review</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         )}
 
         {/* TAB 2: MANAGE REPORTS */}
@@ -583,6 +1015,16 @@ export default function AdminDashboard() {
                   <option value="closed">Closed / Returned</option>
                   <option value="safe">Safe</option>
                 </select>
+
+                <select
+                  value={reportMatchedFilter}
+                  onChange={(e) => setReportMatchedFilter(e.target.value)}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-bold"
+                >
+                  <option value="all">All Match Status</option>
+                  <option value="matched_only">Matched Only</option>
+                  <option value="not_matched">Not Matched</option>
+                </select>
               </div>
             </div>
 
@@ -595,6 +1037,7 @@ export default function AdminDashboard() {
                       <th className="py-3 px-4">Item & Title</th>
                       <th className="py-3 px-4">Type</th>
                       <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4">Matched With</th>
                       <th className="py-3 px-4">Contact Info</th>
                       <th className="py-3 px-4">Status</th>
                       <th className="py-3 px-4 text-right">Actions</th>
@@ -603,68 +1046,111 @@ export default function AdminDashboard() {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {filteredItems.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="py-8 text-center text-slate-400">
+                        <td colSpan="7" className="py-8 text-center text-slate-400">
                           No reports match your filters.
                         </td>
                       </tr>
                     ) : (
-                      filteredItems.map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
-                          <td className="py-3 px-4">
-                            <div className="font-bold text-slate-900 dark:text-slate-100">{item.title}</div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">{item.description}</div>
-                            {item.unique_qr_code && (
-                              <span className="font-mono text-[10px] text-teal-700 dark:text-teal-400">{item.unique_qr_code}</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-0.5 rounded-md font-extrabold uppercase text-[10px] ${
-                              item.type === 'lost' ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' :
-                              item.type === 'found' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' :
-                              'bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300'
-                            }`}>
-                              {item.type}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{item.category}</td>
-                          <td className="py-3 px-4">
-                            <div className="font-semibold text-slate-800 dark:text-slate-200">{item.contact_name}</div>
-                            <div className="text-[11px] text-slate-500 font-mono">{item.contact_email_or_phone}</div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <select
-                              value={item.status}
-                              onChange={(e) => handleStatusChange(item.id, e.target.value)}
-                              className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-[11px] font-bold"
-                            >
-                              <option value="open">Open</option>
-                              <option value="matched">Matched</option>
-                              <option value="claimed">Claimed</option>
-                              <option value="closed">Closed / Returned</option>
-                              <option value="recovered">Recovered</option>
-                            </select>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="inline-flex items-center gap-1.5">
-                              <Link
-                                to={`/items/${item.id}`}
-                                target="_blank"
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-teal-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                                title="Public View"
+                      filteredItems.map((item) => {
+                        const itemMatches = itemMatchesMap[item.id];
+                        return (
+                          <tr key={item.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                            <td className="py-3 px-4">
+                              <div className="font-bold text-slate-900 dark:text-slate-100">{item.title}</div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">{item.description}</div>
+                              {item.unique_qr_code && (
+                                <span className="font-mono text-[10px] text-teal-700 dark:text-teal-400">{item.unique_qr_code}</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-0.5 rounded-md font-extrabold uppercase text-[10px] ${
+                                item.type === 'lost' ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300' :
+                                item.type === 'found' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' :
+                                'bg-cyan-100 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-300'
+                              }`}>
+                                {item.type}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{item.category}</td>
+                            
+                            {/* Matched With Column */}
+                            <td className="py-3 px-4">
+                              {itemMatches && itemMatches.length > 0 ? (
+                                <div className="space-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedMatch(itemMatches[0].match_obj)}
+                                    className="text-left font-bold text-[11px] text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1.5"
+                                    title="Open Match Review"
+                                  >
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                      itemMatches[0].score >= 80 
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' 
+                                        : itemMatches[0].score >= 50
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                                        : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                                    }`}>
+                                      {Math.round(itemMatches[0].score)}%
+                                    </span>
+                                    <span className="truncate max-w-[130px]">{itemMatches[0].counterpart_title}</span>
+                                  </button>
+                                  {itemMatches.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveTab('matches');
+                                        setMatchSearch(item.title);
+                                      }}
+                                      className="text-[10px] font-semibold text-slate-500 hover:text-teal-600 block"
+                                    >
+                                      +{itemMatches.length - 1} more matches
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 text-[11px] italic">No active match</span>
+                              )}
+                            </td>
+
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-slate-800 dark:text-slate-200">{item.contact_name}</div>
+                              <div className="text-[11px] text-slate-500 font-mono">{item.contact_email_or_phone}</div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <select
+                                value={item.status}
+                                onChange={(e) => handleStatusChange(item.id, e.target.value)}
+                                className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-[11px] font-bold"
                               >
-                                <Eye className="w-3.5 h-3.5" />
-                              </Link>
-                              <button
-                                onClick={() => handleDeleteItem(item.id)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
-                                title="Delete Report"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
+                                <option value="open">Open</option>
+                                <option value="matched">Matched</option>
+                                <option value="claimed">Claimed</option>
+                                <option value="closed">Closed / Returned</option>
+                                <option value="recovered">Recovered</option>
+                              </select>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <div className="inline-flex items-center gap-1.5">
+                                <Link
+                                  to={`/item/${item.id}`}
+                                  target="_blank"
+                                  className="p-1.5 rounded-lg text-slate-500 hover:text-teal-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                  title="Public View"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                </Link>
+                                <button
+                                  onClick={() => handleDeleteItem(item.id)}
+                                  className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+                                  title="Delete Report"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -689,56 +1175,69 @@ export default function AdminDashboard() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {stats.pending_claims.map((claim) => (
-                    <div key={claim.id} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                            Claim #{claim.id}
-                          </span>
-                          <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 mt-1">
-                            {claim.found_item ? claim.found_item.title : `Found Item #${claim.found_id}`}
-                          </h3>
+                  {stats.pending_claims.map((claim) => {
+                    const claimMatchObj = matches.find(m => m.id === claim.match_id || m.found_id === claim.found_id);
+                    return (
+                      <div key={claim.id} className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                              Claim #{claim.id}
+                            </span>
+                            <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 mt-1">
+                              {claim.found_item ? claim.found_item.title : `Found Item #${claim.found_id}`}
+                            </h3>
+                          </div>
+                          <StatusBadge status={claim.status} />
                         </div>
-                        <StatusBadge status={claim.status} />
-                      </div>
 
-                      <div className="text-xs space-y-1.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-                        <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                          <User className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="font-semibold">{claim.claimant_name}</span>
-                          <span className="text-slate-400 font-mono">({claim.claimant_contact})</span>
+                        <div className="text-xs space-y-1.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+                          <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                            <User className="w-3.5 h-3.5 text-slate-400" />
+                            <span className="font-semibold">{claim.claimant_name}</span>
+                            <span className="text-slate-400 font-mono">({claim.claimant_contact})</span>
+                          </div>
+                          <div className="text-slate-600 dark:text-slate-400 italic">
+                            <span className="font-semibold text-slate-700 dark:text-slate-300">Proof Provided: </span>
+                            "{claim.proof_text}"
+                          </div>
                         </div>
-                        <div className="text-slate-600 dark:text-slate-400 italic">
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">Proof Provided: </span>
-                          "{claim.proof_text}"
-                        </div>
-                      </div>
 
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          onClick={() => {
-                            setDecisionModal({ claimId: claim.id, action: 'approved' });
-                            setAdminNote('');
-                          }}
-                          className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5" />
-                          <span>Approve Claim</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            setDecisionModal({ claimId: claim.id, action: 'rejected' });
-                            setAdminNote('');
-                          }}
-                          className="flex-1 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs"
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Reject Claim</span>
-                        </button>
+                        <div className="flex items-center gap-2 pt-1">
+                          {claimMatchObj && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMatch(claimMatchObj)}
+                              className="px-3 py-2 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 font-bold text-xs hover:bg-teal-100 flex items-center justify-center gap-1 transition-colors"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                              <span>AI Match ({Math.round(claimMatchObj.score)}%)</span>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setDecisionModal({ claimId: claim.id, action: 'approved' });
+                              setAdminNote('');
+                            }}
+                            className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            <CheckCircle className="w-3.5 h-3.5" />
+                            <span>Approve Claim</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setDecisionModal({ claimId: claim.id, action: 'rejected' });
+                              setAdminNote('');
+                            }}
+                            className="flex-1 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Reject Claim</span>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1417,6 +1916,26 @@ export default function AdminDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Match Review Modal (Step 2 - Task 25) */}
+      {selectedMatch && (
+        <MatchReviewModal
+          match={selectedMatch}
+          token={token}
+          onClose={() => setSelectedMatch(null)}
+          onDecisionComplete={(action, updatedClaim) => {
+            setToast({
+              type: action === 'approved' ? 'success' : action === 'rejected' ? 'error' : 'info',
+              message: action === 'approved' 
+                ? 'Claim approved successfully! Handover code generated and notifications sent.' 
+                : action === 'rejected'
+                ? 'Claim rejected. Item returned to open/matched state.'
+                : 'Request for additional proof sent to student.'
+            });
+            loadData(token);
+          }}
+        />
       )}
 
     </div>

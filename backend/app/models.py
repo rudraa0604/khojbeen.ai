@@ -121,9 +121,17 @@ class Claim(Base):
     found_id = Column(Integer, ForeignKey("items.id"), nullable=False, index=True)
     claimant_name = Column(String(100), nullable=False)
     claimant_contact = Column(String(100), nullable=False)
+    claimant_department = Column(String(100), nullable=True)
     proof_text = Column(Text, nullable=False)
-    status = Column(String(20), nullable=False, default="pending", index=True)  # pending, approved, rejected
+    secret_question = Column(String(255), nullable=True)
+    secret_answer = Column(String(255), nullable=True)
+    claimant_answer = Column(String(255), nullable=True)
+    proof_image = Column(String(255), nullable=True)
+    status = Column(String(20), nullable=False, default="pending", index=True)  # pending, approved, rejected, more_proof_requested
     admin_note = Column(Text, nullable=True)
+    handover_code = Column(String(10), nullable=True)
+    handover_status = Column(String(30), default="pending")  # pending, handed_over
+    wrong_code_attempts = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     decided_at = Column(DateTime, nullable=True)
 
@@ -215,3 +223,33 @@ class RegisteredItem(Base):
     contact_preference = Column(String(50), default="portal")
     is_lost = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class FinderResponse(Base):
+    __tablename__ = "finder_responses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=True, index=True)
+    unique_code = Column(String(50), nullable=False, index=True)
+    campus_id = Column(Integer, ForeignKey("campuses.id"), nullable=True, index=True)
+    option_type = Column(String(10), nullable=False)  # 'A', 'B', 'C'
+    message = Column(Text, nullable=True)
+    found_location = Column(String(150), nullable=True)
+    photo_path = Column(String(255), nullable=True)
+    meeting_place = Column(String(100), nullable=True)
+    meeting_time = Column(String(100), nullable=True)
+    coordinator_id = Column(Integer, ForeignKey("faculty_coordinators.id"), nullable=True, index=True)
+    finder_name = Column(String(100), nullable=True)
+    finder_mobile = Column(String(50), nullable=True)
+    finder_department = Column(String(100), nullable=True)
+    consent_given = Column(Boolean, default=False)
+    status = Column(String(30), default="submitted")  # submitted, item_received, claim_approved, handed_over, spam_blocked
+    handover_code_hash = Column(String(255), nullable=True)
+    finder_token = Column(String(100), unique=True, nullable=True, index=True)
+    owner_reply = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    item = relationship("Item")
+    campus = relationship("Campus")
+    coordinator = relationship("FacultyCoordinator")
