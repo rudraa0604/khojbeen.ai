@@ -9,11 +9,18 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.db import engine, Base, run_migrations
+from app.seed import ensure_seed_data
 from app.routers import auth, items, matches, claims, admin, chat, faculty, notifications, qr_tags, campuses, students, super_admin
 
 # Create tables and run migrations
 Base.metadata.create_all(bind=engine)
 run_migrations()
+
+# Auto-seed default campuses, admins, students, and sample content on startup (e.g. Render / Docker)
+try:
+    ensure_seed_data()
+except Exception as e:
+    print(f"[WARN] Startup auto-seeding warning: {e}")
 
 # Rate limiter setup
 limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])

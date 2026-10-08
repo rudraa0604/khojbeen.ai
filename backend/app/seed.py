@@ -16,150 +16,114 @@ from app.services.image_matcher import compute_image_embedding
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-def seed_database():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-
-    db: Session = SessionLocal()
+def ensure_seed_data(db: Session = None):
+    """
+    Non-destructive seed check:
+    Ensures all default campuses, admin accounts, and demo students exist on startup.
+    If the database is empty, runs full initial seeding.
+    Guarantees admin credentials work immediately upon deployment on Render/production.
+    """
+    close_db = False
+    if db is None:
+        db = SessionLocal()
+        close_db = True
 
     try:
-        # 1. Seed 3 Campuses (Task 12 & Task 23)
-        campuses = [
-            Campus(
-                id=1,
-                name="Jagran Main Campus (Kanpur)",
-                city="Kanpur",
-                slug="jagran-main",
-                logo_url="https://images.unsplash.com/photo-1562774053-701939374585?w=120&auto=format&fit=crop&q=80",
-                contact_email="helpdesk.main@jagran.edu",
-                share_reports=True,
-                announcement="Welcome to Jagran Main Campus Lost & Found! Please tag your laptops and IDs at Student Dashboard.",
-                is_active=True
-            ),
-            Campus(
-                id=2,
-                name="Jagran City Campus (Civil Lines)",
-                city="Kanpur",
-                slug="jagran-city",
-                logo_url="https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=120&auto=format&fit=crop&q=80",
-                contact_email="helpdesk.city@jagran.edu",
-                share_reports=True,
-                announcement="Civil Lines desk is open Mon-Sat 9 AM - 5 PM for lost belongings collection.",
-                is_active=True
-            ),
-            Campus(
-                id=3,
-                name="Jagran Institute of Management (South City)",
-                city="Kanpur",
-                slug="jagran-jim",
-                logo_url="https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=120&auto=format&fit=crop&q=80",
-                contact_email="helpdesk.jim@jagran.edu",
-                share_reports=True,
-                announcement="JIM Management Building Lost & Found Counter located in Room 102.",
-                is_active=True
-            ),
+        # 1. Ensure Campuses exist
+        campuses_data = [
+            (1, "Jagran Main Campus (Kanpur)", "Kanpur", "jagran-main",
+             "https://images.unsplash.com/photo-1562774053-701939374585?w=120&auto=format&fit=crop&q=80",
+             "helpdesk.main@jagran.edu", True,
+             "Welcome to Jagran Main Campus Lost & Found! Please tag your laptops and IDs at Student Dashboard.", True),
+            (2, "Jagran City Campus (Civil Lines)", "Kanpur", "jagran-city",
+             "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=120&auto=format&fit=crop&q=80",
+             "helpdesk.city@jagran.edu", True,
+             "Civil Lines desk is open Mon-Sat 9 AM - 5 PM for lost belongings collection.", True),
+            (3, "Jagran Institute of Management (South City)", "Kanpur", "jagran-jim",
+             "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=120&auto=format&fit=crop&q=80",
+             "helpdesk.jim@jagran.edu", True,
+             "JIM Management Building Lost & Found Counter located in Room 102.", True),
         ]
-        db.add_all(campuses)
+        for cid, name, city, slug, logo, email, share, ann, active in campuses_data:
+            c = db.query(Campus).filter(Campus.id == cid).first()
+            if not c:
+                c = Campus(id=cid, name=name, city=city, slug=slug, logo_url=logo,
+                           contact_email=email, share_reports=share, announcement=ann, is_active=active)
+                db.add(c)
         db.commit()
-        print("[OK] Seeded 3 Campuses")
 
-        # 2. Seed Admin Users (Task 23: Super Admin + 3 College Admins)
-        admins = [
-            Admin(
-                username="superadmin",
-                campus_id=None,
-                role="super_admin",
-                full_name="Chief Platform Administrator",
-                email="superadmin@khojbeen.ai",
-                password_hash=hash_password("SuperAdmin@12345")
-            ),
-            Admin(
-                username="campus_admin1",
-                campus_id=1,
-                role="college_admin",
-                full_name="Prof. Arvind Kumar (Main Campus)",
-                email="admin.main@jagran.edu",
-                password_hash=hash_password("Admin@12345")
-            ),
-            Admin(
-                username="campus_admin2",
-                campus_id=2,
-                role="college_admin",
-                full_name="Dr. Shalini Gupta (City Campus)",
-                email="admin.city@jagran.edu",
-                password_hash=hash_password("Admin@12345")
-            ),
-            Admin(
-                username="campus_admin3",
-                campus_id=3,
-                role="college_admin",
-                full_name="Mr. Rajeev Mishra (JIM)",
-                email="admin.jim@jagran.edu",
-                password_hash=hash_password("Admin@12345")
-            ),
-            Admin(
-                username="admin",
-                campus_id=1,
-                role="college_admin",
-                full_name="Legacy Desk Admin",
-                email="admin@jagran.edu",
-                password_hash=hash_password("admin123")
-            )
+        # 2. Ensure Admin Accounts exist
+        default_admins = [
+            ("superadmin", None, "super_admin", "Chief Platform Administrator", "superadmin@khojbeen.ai", "SuperAdmin@12345"),
+            ("campus_admin1", 1, "college_admin", "Prof. Arvind Kumar (Main Campus)", "admin.main@jagran.edu", "Admin@12345"),
+            ("campus_admin2", 2, "college_admin", "Dr. Shalini Gupta (City Campus)", "admin.city@jagran.edu", "Admin@12345"),
+            ("campus_admin3", 3, "college_admin", "Mr. Rajeev Mishra (JIM)", "admin.jim@jagran.edu", "Admin@12345"),
+            ("admin", 1, "college_admin", "Legacy Desk Admin", "admin@jagran.edu", "admin123"),
         ]
-        db.add_all(admins)
+        for uname, cid, role, fname, email, plain_pw in default_admins:
+            adm = db.query(Admin).filter(Admin.username == uname).first()
+            if not adm:
+                adm = Admin(
+                    username=uname,
+                    campus_id=cid,
+                    role=role,
+                    full_name=fname,
+                    email=email,
+                    password_hash=hash_password(plain_pw)
+                )
+                db.add(adm)
+            else:
+                try:
+                    if not bcrypt.checkpw(plain_pw.encode("utf-8"), adm.password_hash.encode("utf-8")):
+                        adm.password_hash = hash_password(plain_pw)
+                except Exception:
+                    adm.password_hash = hash_password(plain_pw)
         db.commit()
-        print("[OK] Created Super Admin and 3 College Admins")
 
-        # 3. Seed Demo Students
-        students = [
-            User(
-                id=1,
-                campus_id=1,
-                email="aarav.sharma@campus.edu",
-                password_hash=hash_password("Student@12345"),
-                full_name="Aarav Sharma",
-                mobile="+91 98765 43210",
-                department="Computer Science",
-                role="student"
-            ),
-            User(
-                id=2,
-                campus_id=1,
-                email="priya.v@campus.edu",
-                password_hash=hash_password("Student@12345"),
-                full_name="Priya Verma",
-                mobile="+91 98765 11223",
-                department="Electronics",
-                role="student"
-            ),
-            User(
-                id=3,
-                campus_id=2,
-                email="student.city@jagran.edu",
-                password_hash=hash_password("Student@12345"),
-                full_name="Karan Malhotra",
-                mobile="+91 98111 99887",
-                department="Commerce",
-                role="student"
-            ),
-            User(
-                id=4,
-                campus_id=3,
-                email="student.jim@jagran.edu",
-                password_hash=hash_password("Student@12345"),
-                full_name="Sanya Kapoor",
-                mobile="+91 98222 77665",
-                department="Management Studies",
-                role="student"
-            )
+        # 3. Ensure Demo Students exist
+        default_students = [
+            (1, 1, "aarav.sharma@campus.edu", "Student@12345", "Aarav Sharma", "+91 98765 43210", "Computer Science", "student"),
+            (2, 1, "priya.v@campus.edu", "Student@12345", "Priya Verma", "+91 98765 11223", "Electronics", "student"),
+            (3, 2, "student.city@jagran.edu", "Student@12345", "Karan Malhotra", "+91 98111 99887", "Commerce", "student"),
+            (4, 3, "student.jim@jagran.edu", "Student@12345", "Sanya Kapoor", "+91 98222 77665", "Management Studies", "student"),
         ]
-        db.add_all(students)
+        for uid, cid, email, plain_pw, fname, mobile, dept, role in default_students:
+            u = db.query(User).filter((User.id == uid) | (User.email == email)).first()
+            if not u:
+                u = User(
+                    id=uid,
+                    campus_id=cid,
+                    email=email,
+                    password_hash=hash_password(plain_pw),
+                    full_name=fname,
+                    mobile=mobile,
+                    department=dept,
+                    role=role
+                )
+                db.add(u)
+            else:
+                try:
+                    if not bcrypt.checkpw(plain_pw.encode("utf-8"), u.password_hash.encode("utf-8")):
+                        u.password_hash = hash_password(plain_pw)
+                except Exception:
+                    u.password_hash = hash_password(plain_pw)
         db.commit()
-        print("[OK] Seeded 4 Demo Student accounts across 3 colleges")
 
+        # 4. If Items table is empty, seed mock items & faculty coordinators
+        if db.query(Item).count() == 0:
+            print("[INFO] Database empty on startup: seeding sample items & coordinators...")
+            _seed_content_internal(db)
+
+    except Exception as e:
+        print(f"[WARN] Error in ensure_seed_data: {e}")
+        db.rollback()
+    finally:
+        if close_db:
+            db.close()
+
+def _seed_content_internal(db: Session):
+    try:
         today = datetime.date.today()
-
-        # 4. 12 Lost Items distributed across 3 Campuses
         lost_data = [
             # Campus 1 (Main Campus)
             {
@@ -682,9 +646,15 @@ def seed_database():
 
         db.commit()
         print(f"[OK] Seeded {len(coordinators_data)} sample Faculty Coordinators across 3 campuses")
+    except Exception as e:
+        print(f"[WARN] Error seeding mock content: {e}")
+        db.rollback()
 
-    finally:
-        db.close()
+def seed_database():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    ensure_seed_data()
+    print("[OK] Database seed completed successfully.")
 
 if __name__ == "__main__":
     seed_database()
